@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "FlowDesk: Start development server",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"flowdesk",
+				"run",
+				"dev"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

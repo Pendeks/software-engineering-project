@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlowDesk</title>
+    <style>
+      :root {
+        --bg: #0F1117;
+        --bg-accent: #6366F1;
+        --panel: rgba(17, 24, 39, 0.9);
+        --panel-alt: rgba(10, 15, 28, 0.9);
+        --primary: #22c55e;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --danger: #f87171;
+        --border: rgba(148, 163, 184, 0.2);
+        --input-bg: rgba(15, 23, 42, 0.9);
+        --button-text: #062b15;
+      }
+
+      body.light-mode {
+        --bg: #f8fafc;
+        --bg-accent: #e2e8f0;
+        --panel: rgba(255, 255, 255, 0.95);
+        --panel-alt: rgba(248, 250, 252, 0.9);
+        --primary: #16a34a;
+        --text: #0f172a;
+        --muted: #475569;
+        --danger: #dc2626;
+        --border: rgba(15, 23, 42, 0.12);
+        --input-bg: rgba(255, 255, 255, 0.9);
+        --button-text: #ecfdf5;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: linear-gradient(135deg, var(--bg), var(--bg-accent) 45%, rgba(15, 23, 42, 0.9));
+        color: var(--text);
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .container {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 20px 80px;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+        gap: 16px;
+      }
+
+      .badge {
+        background: rgba(34, 197, 94, 0.18);
+        color: var(--primary);
+        border: 1px solid rgba(34, 197, 94, 0.4);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .task-item-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .task-item-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .task-edit-button {
+        align-self: flex-start;
+      }
+
+      .task-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 2px;
+        margin-bottom: 2px;
+      }
+
+      .task-item-main label.muted {
+        margin: 0;
+        display: block;
+      }
+
+      .task-comments {
+        margin-top: 14px;
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+        background: rgba(148, 163, 184, 0.04);
+        border-radius: 10px;
+        padding: 12px;
+      }
+
+      .task-comment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .task-comment-list > div {
+        background: rgba(148, 163, 184, 0.07);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 6px 8px;
+      }
+
+      .task-comment-form {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .task-comment-form input {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .project-item-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+        transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .form-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .inline-row {
+        display: flex;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .inline-row > * {
+        flex: 1;
+      }
+
+      @media (max-width: 640px) {
+        .container {
+          padding: 24px 16px 56px;
+        }
+
+        .header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .header > div:last-child {
+          flex-wrap: wrap;
+          justify-content: flex-start;
+        }
+
+        .inline-row {
+          align-items: stretch;
+          flex-direction: column;
+        }
+      }
+
+      input, select, button {
+        font: inherit;
+      }
+
+      input, select {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--input-bg);
+        color: var(--text);
+      }
+
+      button {
+        background: var(--primary);
+        color: var(--button-text);
+        border: none;
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+        box-shadow: 0 8px 16px rgba(34, 197, 94, 0.18);
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+      }
+
+      button.secondary {
+        background: rgba(148, 163, 184, 0.08);
+        border: 1px solid var(--border);
+        color: var(--text);
+        box-shadow: none;
+      }
+
+      .theme-toggle {
+        width: 52px;
+        height: 30px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 4px;
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(15, 23, 42, 0.9));
+        border: 1px solid var(--border);
+        position: relative;
+        overflow: hidden;
+      }
+
+      body.light-mode .theme-toggle {
+        background: linear-gradient(135deg, rgba(250, 204, 21, 0.25), rgba(148, 163, 184, 0.4));
+      }
+
+      .theme-switch-thumb {
+        position: absolute;
+        left: 4px;
+        top: 4px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.2s ease, background 0.2s ease;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        font-size: 0.7rem;
+      }
+
+      body.light-mode .theme-switch-thumb {
+        transform: translateX(22px);
+        background: #facc15;
+        color: #1f2937;
+      }
+
+      .status {
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .muted { color: var(--muted); }
+      .error { color: var(--danger); }
+      .hidden { display: none !important; }
+
+      ul {
+        list-style: none;
+        padding-left: 0;
+        margin: 0;
+      }
+
+      li {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      li:last-child { border-bottom: none; }
+
+      .task-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      :root {
+        color-scheme: dark;
+        --bg: #151922;
+        --bg-accent: #151922;
+        --panel: #2d3240;
+        --panel-alt: #242936;
+        --primary: #554cf5;
+        --text: #f1f2f6;
+        --muted: #9299a9;
+        --border: rgba(148, 157, 176, 0.16);
+        --input-bg: #202531;
+        --button-text: #ffffff;
+      }
+
+      body.light-mode {
+        color-scheme: light;
+        --bg: #eef0f5;
+        --bg-accent: #eef0f5;
+        --panel: #ffffff;
+        --panel-alt: #f6f7fb;
+        --primary: #5148e8;
+        --text: #1b2030;
+        --muted: #687184;
+        --border: rgba(31, 41, 55, 0.12);
+        --input-bg: #ffffff;
+        --button-text: #ffffff;
+      }
+
+      body {
+        min-height: 100vh;
+        font-family: Inter, "Segoe UI", Arial, sans-serif;
+        background: var(--bg);
+        transition: background-color 0.2s ease, color 0.2s ease;
+      }
+
+      .container {
+        width: min(100%, 1440px);
+        max-width: none;
+        padding: 28px 32px 64px;
+      }
+
+      .header {
+        min-height: 76px;
+        margin-bottom: 24px;
+        padding: 14px 18px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        color: var(--primary);
+        font-size: 1.15rem;
+        font-weight: 750;
+        letter-spacing: 0.01em;
+      }
+
+      .badge::before {
+        content: "";
+        width: 9px;
+        height: 17px;
+        border-radius: 3px;
+        background: var(--primary);
+        box-shadow: 5px -4px 0 -1px var(--primary), 10px 2px 0 -2px var(--primary);
+      }
+
+      h1 {
+        margin: 8px 0 0;
+        font-size: 1.35rem;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+
+      h3 {
+        margin-top: 0;
+        font-size: 1.05rem;
+        font-weight: 650;
+      }
+
+      .grid {
+        grid-template-columns: minmax(220px, 0.85fr) minmax(230px, 1fr) minmax(360px, 1.7fr);
+        gap: 14px;
+      }
+
+      .card {
+        padding: 16px;
+        border-radius: 6px;
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+      }
+
+      .task-comments {
+        padding: 12px;
+        background: var(--panel-alt);
+        border-radius: 6px;
+      }
+
+      .task-comment-list > div {
+        background: var(--panel);
+        border-radius: 5px;
+      }
+
+      input, select {
+        border-radius: 5px;
+      }
+
+      input::placeholder {
+        color: var(--muted);
+        opacity: 0.8;
+      }
+
+      input:focus, select:focus, button:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      button {
+        border-radius: 5px;
+        padding: 10px 14px;
+        box-shadow: none;
+        transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease;
+      }
+
+      button:hover {
+        opacity: 0.92;
+      }
+
+      button.secondary {
+        background: var(--panel-alt);
+      }
+
+      .theme-toggle {
+        background: var(--panel-alt);
+      }
+
+      .status {
+        color: #00c99a;
+      }
+
+      body.light-mode .status {
+        color: #008e70;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        width: fit-content;
+        padding: 4px 9px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        font-weight: 650;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+
+      .status-pill::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .status-blocked {
+        color: #ff7185;
+        background: rgba(248, 81, 105, 0.13);
+        border-color: rgba(248, 81, 105, 0.24);
+      }
+
+      .status-progress {
+        color: #ffc05c;
+        background: rgba(245, 158, 11, 0.13);
+        border-color: rgba(245, 158, 11, 0.24);
+      }
+
+      .status-review {
+        color: #b9a0ff;
+        background: rgba(139, 92, 246, 0.14);
+        border-color: rgba(139, 92, 246, 0.25);
+      }
+
+      .status-upcoming {
+        color: #79b7ff;
+        background: rgba(59, 130, 246, 0.13);
+        border-color: rgba(59, 130, 246, 0.24);
+      }
+
+      .status-done {
+        color: #36d9ad;
+        background: rgba(0, 201, 154, 0.13);
+        border-color: rgba(0, 201, 154, 0.24);
+      }
+
+      .status-neutral {
+        color: var(--muted);
+        background: rgba(148, 157, 176, 0.1);
+        border-color: var(--border);
+      }
+
+      body.light-mode .status-blocked {
+        color: #b42336;
+        background: #fff0f1;
+        border-color: #f6c8ce;
+      }
+
+      body.light-mode .status-progress {
+        color: #9a5a00;
+        background: #fff6e5;
+        border-color: #f4d8a7;
+      }
+
+      body.light-mode .status-review {
+        color: #6941c6;
+        background: #f4efff;
+        border-color: #ddd0ff;
+      }
+
+      body.light-mode .status-upcoming {
+        color: #175cd3;
+        background: #eff6ff;
+        border-color: #c9ddff;
+      }
+
+      body.light-mode .status-done {
+        color: #067647;
+        background: #ecfdf3;
+        border-color: #b7ebcc;
+      }
+
+      li {
+        padding: 12px 0;
+      }
+
+      @media (max-width: 1050px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .grid > .card:last-child {
+          grid-column: 1 / -1;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .container {
+          padding: 14px 12px 40px;
+        }
+
+        .header {
+          padding: 14px;
+        }
+
+        .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .grid > .card:last-child {
+          grid-column: auto;
+        }
+
+        .task-comment-form {
+          align-items: stretch;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div>
+          <div class="badge">FlowDesk</div>
+          <h1>Project management</h1>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <span id="currentUserLabel" class="muted"></span>
+          <button id="logoutButton" class="secondary" type="button">Log out</button>
+          <button id="themeToggle" class="secondary theme-toggle" type="button" aria-label="Toggle theme">
+            <span class="theme-switch-thumb">☀️</span>
+          </button>
+          <button id="healthButton" class="secondary">Check service status</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Service status</h3>
+          <p id="serviceStatus" class="status">Checking...</p>
+        </div>
+        <div class="card">
+          <h3>Current projects</h3>
+          <ul id="projectList"></ul>
+        </div>
+        <div class="card">
+          <div class="toolbar" style="display: grid; gap: 12px;">
+            <h3 style="margin: 0;">Latest tasks</h3>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <input id="taskSearchInput" type="search" placeholder="Search tasks or assignees" aria-label="Search tasks" style="flex: 1; min-width: 160px;" />
+              <select id="taskStatusFilter" aria-label="Filter tasks by status">
+                <option value="All">All</option>
+                <option value="Backlog">Backlog</option>
+                <option value="To Do">To Do</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Review">Review</option>
+                <option value="Done">Done</option>
+              </select>
+            </div>
+          </div>
+          <ul id="taskList"></ul>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 24px;">
+        <h3>Create a project</h3>
+        <form id="projectForm">
+          <input id="projectEditId" type="hidden" />
+          <div class="inline-row">
+            <div class="form-row" style="flex: 2;">
+              <label for="projectName">Project name</label>
+              <input id="projectName" required placeholder="Customer Success Ops" />
+            </div>
+            <div class="form-row" style="flex: 1;">
+              <label for="projectOwner">Owner</label>
+              <input id="projectOwner" required placeholder="Ava Stone" />
+            </div>
+          </div>
+          <div class="form-row">
+            <label for="projectStatus">Status</label>
+            <select id="projectStatus">
+              <option value="Planning">Planning</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Blocked">Blocked</option>
+              <option value="Done">Done</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button id="projectSubmitButton" type="submit">Add project</button>
+            <button id="projectCancelEditButton" type="button" class="secondary hidden">Cancel edit</button>
+          </div>
+        </form>
+        <p id="projectStatusMessage" class="muted"></p>
+      </div>
+
+      <div class="card" style="margin-top: 24px;">
+        <h3>Create a task</h3>
+        <form id="taskForm">
+          <input id="taskEditId" type="hidden" />
+          <div class="form-row">
+            <label for="projectSelect">Project</label>
+            <select id="projectSelect" required></select>
+          </div>
+          <div class="form-row">
+            <label for="taskTitle">Task title</label>
+            <input id="taskTitle" required placeholder="Draft launch brief" />
+          </div>
+          <div class="form-row">
+            <label for="taskAssignee">Assignee</label>
+            <input id="taskAssignee" placeholder="Ava Stone" />
+          </div>
+          <div class="form-row">
+            <label for="taskStatus">Status</label>
+            <select id="taskStatus">
+              <option value="Backlog">Backlog</option>
+              <option value="To Do">To Do</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Review">Review</option>
+              <option value="Done">Done</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button id="taskSubmitButton" type="submit">Add task</button>
+            <button id="taskCancelEditButton" type="button" class="secondary hidden">Cancel edit</button>
+          </div>
+        </form>
+        <p id="taskStatusMessage" class="muted"></p>
+      </div>
+    </div>
+
+    <script>
+      const tokenKey = 'flowdesk-token';
+      const themeKey = 'flowdesk-theme';
+      let token = localStorage.getItem(tokenKey) || '';
+      let currentRole = localStorage.getItem('flowdesk-role') || '';
+      let currentUserName = localStorage.getItem('flowdesk-user-name') || '';
+      let activeProjectId = '';
+      let allTasks = [];
+
+      function applyTheme(theme) {
+        const isLight = theme === 'light';
+        document.body.classList.toggle('light-mode', isLight);
+        localStorage.setItem(themeKey, theme);
+
+        const toggleButton = document.getElementById('themeToggle');
+        if (toggleButton) {
+          toggleButton.setAttribute('aria-label', isLight ? 'Switch to dark mode' : 'Switch to light mode');
+          const thumb = toggleButton.querySelector('.theme-switch-thumb');
+          if (thumb) {
+            thumb.textContent = isLight ? '🌙' : '☀️';
+          }
+        }
+      }
+
+      function initializeTheme() {
+        const storedTheme = localStorage.getItem(themeKey) || 'dark';
+        applyTheme(storedTheme);
+      }
+
+      async function fetchJson(url, options = {}) {
+        const headers = {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        };
+
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(url, {
+          ...options,
+          headers
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 401 && url !== '/api/auth/login') {
+            token = '';
+            localStorage.removeItem(tokenKey);
+            localStorage.removeItem('flowdesk-role');
+            localStorage.removeItem('flowdesk-user-name');
+            window.location.replace('/login');
+          }
+          throw new Error(data.error || 'Request failed.');
+        }
+
+        return data;
+      }
+
+      function setTaskStatus(message, isError = false) {
+        const status = document.getElementById('taskStatusMessage');
+        status.textContent = message;
+        status.className = isError ? 'error' : 'muted';
+      }
+
+      function setProjectStatus(message, isError = false) {
+        const status = document.getElementById('projectStatusMessage');
+        status.textContent = message;
+        status.className = isError ? 'error' : 'muted';
+      }
+
+      function resetProjectForm() {
+        document.getElementById('projectForm').reset();
+        document.getElementById('projectEditId').value = '';
+        document.getElementById('projectSubmitButton').textContent = 'Add project';
+        document.getElementById('projectCancelEditButton').classList.add('hidden');
+      }
+
+      function populateProjectForm(project) {
+        document.getElementById('projectEditId').value = project.id;
+        document.getElementById('projectName').value = project.name;
+        document.getElementById('projectOwner').value = project.owner;
+        document.getElementById('projectStatus').value = project.status;
+        document.getElementById('projectSubmitButton').textContent = 'Update project';
+        document.getElementById('projectCancelEditButton').classList.remove('hidden');
+      }
+
+      function getStatusClass(status) {
+        const statusClasses = {
+          'blocked': 'status-blocked',
+          'in progress': 'status-progress',
+          'review': 'status-review',
+          'planning': 'status-upcoming',
+          'to do': 'status-upcoming',
+          'backlog': 'status-neutral',
+          'done': 'status-done'
+        };
+        return statusClasses[String(status).trim().toLowerCase()] || 'status-neutral';
+      }
+
+      function renderProjectList(projects) {
+        const list = document.getElementById('projectList');
+        if (!projects.length) {
+          list.innerHTML = '<li class="muted">No projects found.</li>';
+          return;
+        }
+
+        list.innerHTML = projects
+          .map((project) => `
+            <li>
+              <div class="project-item-row">
+                <div>
+                  <strong>${project.name}</strong>
+                  <div class="muted">${project.owner}</div>
+                  <span class="status-pill ${getStatusClass(project.status)}">${project.status}</span>
+                </div>
+                ${['Admin', 'Manager'].includes(currentRole) ? `<button type="button" class="secondary project-edit-button" data-project-id="${project.id}">Edit</button>` : ''}
+              </div>
+            </li>
+          `)
+          .join('');
+
+        document.querySelectorAll('.project-edit-button').forEach((button) => {
+          button.addEventListener('click', () => {
+            const projectId = button.getAttribute('data-project-id');
+            const project = projects.find((entry) => entry.id === projectId);
+            if (project) {
+              populateProjectForm(project);
+              window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            }
+          });
+        });
+      }
+
+      function resetTaskForm() {
+        document.getElementById('taskForm').reset();
+        document.getElementById('taskEditId').value = '';
+        document.getElementById('taskSubmitButton').textContent = 'Add task';
+        document.getElementById('taskCancelEditButton').classList.add('hidden');
+      }
+
+      function populateTaskForm(task) {
+        document.getElementById('taskEditId').value = task.id;
+        document.getElementById('projectSelect').value = task.projectId;
+        document.getElementById('taskTitle').value = task.title;
+        document.getElementById('taskAssignee').value = task.assignee || '';
+        document.getElementById('taskStatus').value = task.status;
+        document.getElementById('taskSubmitButton').textContent = 'Update task';
+        document.getElementById('taskCancelEditButton').classList.remove('hidden');
+      }
+
+      function renderTaskList(tasks) {
+        allTasks = tasks;
+        const list = document.getElementById('taskList');
+        if (!tasks.length) {
+          list.innerHTML = '<li class="muted">No tasks yet.</li>';
+          return;
+        }
+
+        list.innerHTML = tasks
+          .map((task) => `
+            <li>
+              <div class="task-item-row">
+                <div class="task-item-main">
+                  <strong>${task.title}</strong>
+                  <div class="task-meta">
+                    <span>${task.assignee || 'Unassigned'}</span>
+                    <span class="status-pill ${getStatusClass(task.status)}">${task.status}</span>
+                  </div>
+                  ${currentRole === 'Admin' || currentRole === 'Manager' || (currentRole === 'Member' && task.assignee === currentUserName) ? `<button type="button" class="secondary task-edit-button" data-task-id="${task.id}">Edit</button>` : ''}
+                </div>
+              </div>
+
+              <div class="task-comments">
+                <div class="task-comment-list">
+                  ${(task.comments && task.comments.length ? task.comments.slice(-3).map((comment) => `<div>• ${comment}</div>`).join('') : '<div class="muted">No comments yet.</div>')}
+                </div>
+                ${currentRole === 'Viewer' ? '' : `<form class="task-comment-form" data-task-id="${task.id}">
+                  <input type="text" name="commentText" placeholder="Add a quick update" maxlength="180" />
+                  <button type="submit" class="secondary">Comment</button>
+                </form>`}
+              </div>
+            </li>
+          `)
+          .join('');
+
+        const editButtons = document.querySelectorAll('.task-edit-button');
+        editButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            const taskId = button.getAttribute('data-task-id');
+            const task = allTasks.find((entry) => entry.id === taskId);
+            if (task) {
+              populateTaskForm(task);
+              window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            }
+          });
+        });
+
+        const commentForms = document.querySelectorAll('.task-comment-form');
+        commentForms.forEach((form) => {
+          form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const taskId = form.getAttribute('data-task-id');
+            const input = form.querySelector('input[name="commentText"]');
+            const comment = input.value.trim();
+
+            if (!comment) {
+              return;
+            }
+
+            try {
+              await fetchJson(`/api/tasks/${taskId}/comments`, {
+                method: 'POST',
+                body: JSON.stringify({ text: comment })
+              });
+
+              input.value = '';
+              await loadDashboard();
+            } catch (error) {
+              setTaskStatus(error.message, true);
+            }
+          });
+        });
+      }
+
+      function renderProjectOptions(projects) {
+        const select = document.getElementById('projectSelect');
+        if (!projects.length) {
+          select.innerHTML = '<option value="">No projects available</option>';
+          return;
+        }
+
+        const previousValue = select.value || projects[0].id;
+        activeProjectId = projects.some((project) => project.id === previousValue) ? previousValue : projects[0].id;
+
+        select.innerHTML = projects
+          .map((project) => `<option value="${project.id}" ${project.id === activeProjectId ? 'selected' : ''}>${project.name}</option>`)
+          .join('');
+      }
+
+      async function loadTasksForActiveProject() {
+        if (!token || !activeProjectId) {
+          renderTaskList([]);
+          return;
+        }
+
+        try {
+          const filterValue = document.getElementById('taskStatusFilter').value;
+          const searchValue = document.getElementById('taskSearchInput').value.trim();
+          const query = new URLSearchParams({ projectId: activeProjectId });
+
+          if (filterValue && filterValue !== 'All') {
+            query.set('status', filterValue);
+          }
+
+          if (searchValue) {
+            query.set('q', searchValue);
+          }
+
+          const taskData = await fetchJson(`/api/tasks?${query.toString()}`);
+          renderTaskList(taskData.tasks || []);
+        } catch (error) {
+          setTaskStatus(error.message, true);
+        }
+      }
+
+      async function loadDashboard() {
+        if (!token) {
+          window.location.replace('/login');
+          return;
+        }
+
+        const healthResponse = await fetch('/api/health');
+        const health = await healthResponse.json();
+        document.getElementById('serviceStatus').textContent = `${health.status} · ${health.service}`;
+
+        try {
+          const projectData = await fetchJson('/api/projects');
+          currentRole = projectData.user.role;
+          currentUserName = projectData.user.name;
+          localStorage.setItem('flowdesk-role', currentRole);
+          localStorage.setItem('flowdesk-user-name', currentUserName);
+          document.getElementById('currentUserLabel').textContent = `${currentUserName} · ${currentRole}`;
+          document.getElementById('projectForm').closest('.card').classList.toggle('hidden', !['Admin', 'Manager'].includes(currentRole));
+          document.getElementById('taskForm').closest('.card').classList.toggle('hidden', currentRole === 'Viewer');
+          const assigneeInput = document.getElementById('taskAssignee');
+          assigneeInput.readOnly = currentRole === 'Member';
+          if (currentRole === 'Member') {
+            assigneeInput.value = currentUserName;
+          }
+          renderProjectList(projectData.projects || []);
+          renderProjectOptions(projectData.projects || []);
+          await loadTasksForActiveProject();
+        } catch (error) {
+          setProjectStatus(error.message, true);
+        }
+      }
+
+      function logout() {
+        localStorage.removeItem(tokenKey);
+        localStorage.removeItem('flowdesk-role');
+        localStorage.removeItem('flowdesk-user-name');
+        window.location.replace('/login');
+      }
+
+      async function handleProjectSubmit(event) {
+        event.preventDefault();
+
+        if (!token) {
+          setProjectStatus('Please log in before creating a project.', true);
+          return;
+        }
+
+        const name = document.getElementById('projectName').value.trim();
+        const owner = document.getElementById('projectOwner').value.trim();
+        const status = document.getElementById('projectStatus').value;
+        const projectId = document.getElementById('projectEditId').value;
+
+        if (!name || !owner) {
+          setProjectStatus('Project name and owner are required.', true);
+          return;
+        }
+
+        try {
+          if (projectId) {
+            await fetchJson(`/api/projects/${projectId}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ name, owner, status })
+            });
+            setProjectStatus('Project updated successfully.');
+          } else {
+            await fetchJson('/api/projects', {
+              method: 'POST',
+              body: JSON.stringify({ name, owner, status })
+            });
+            setProjectStatus('Project created successfully.');
+          }
+
+          resetProjectForm();
+          await loadDashboard();
+        } catch (error) {
+          setProjectStatus(error.message, true);
+        }
+      }
+
+      async function handleTaskSubmit(event) {
+        event.preventDefault();
+
+        if (!token) {
+          setTaskStatus('Please log in before creating a task.', true);
+          return;
+        }
+
+        const projectId = document.getElementById('projectSelect').value;
+        const title = document.getElementById('taskTitle').value.trim();
+        const assignee = document.getElementById('taskAssignee').value.trim();
+        const status = document.getElementById('taskStatus').value;
+        const taskId = document.getElementById('taskEditId').value;
+
+        if (!title || !projectId) {
+          setTaskStatus('Task title and project are required.', true);
+          return;
+        }
+
+        try {
+          if (taskId) {
+            await fetchJson(`/api/tasks/${taskId}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ title, projectId, assignee, status })
+            });
+            setTaskStatus('Task updated successfully.');
+          } else {
+            await fetchJson('/api/tasks', {
+              method: 'POST',
+              body: JSON.stringify({ title, projectId, assignee, status })
+            });
+            setTaskStatus('Task created successfully.');
+          }
+
+          resetTaskForm();
+          await loadDashboard();
+        } catch (error) {
+          setTaskStatus(error.message, true);
+        }
+      }
+
+      document.getElementById('projectSelect').addEventListener('change', async (event) => {
+        activeProjectId = event.target.value;
+        await loadTasksForActiveProject();
+      });
+
+      document.getElementById('taskStatusFilter').addEventListener('change', async () => {
+        await loadTasksForActiveProject();
+      });
+
+      document.getElementById('taskSearchInput').addEventListener('input', async () => {
+        await loadTasksForActiveProject();
+      });
+
+      document.getElementById('projectCancelEditButton').addEventListener('click', () => {
+        resetProjectForm();
+      });
+
+      document.getElementById('taskCancelEditButton').addEventListener('click', () => {
+        resetTaskForm();
+      });
+
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        const nextTheme = document.body.classList.contains('light-mode') ? 'dark' : 'light';
+        applyTheme(nextTheme);
+      });
+
+      document.getElementById('healthButton').addEventListener('click', loadDashboard);
+      document.getElementById('logoutButton').addEventListener('click', logout);
+      document.getElementById('projectForm').addEventListener('submit', handleProjectSubmit);
+      document.getElementById('taskForm').addEventListener('submit', handleTaskSubmit);
+      initializeTheme();
+      loadDashboard();
+    </script>
+  </body>
+</html>

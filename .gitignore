@@ -1,0 +1,20 @@
+# Dependencies and generated output
+**/node_modules/
+**/dist/
+**/coverage/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and local runtime data
+*.log
+npm-debug.log*
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+.idea/
