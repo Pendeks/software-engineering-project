@@ -2,7 +2,6 @@ import io
 import logging
 import math
 import re
-import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -15,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from documind.config import Settings
+from documind.document_validation import has_safe_docx_archive
 from documind.models import Chunk, Document, DocumentVersion, ProcessingJob
 from documind.storage import LocalFileStorage
 
@@ -54,8 +54,8 @@ def extract_sections(filename: str, content: bytes) -> list[ExtractedSection]:
                 for index, page in enumerate(reader.pages, start=1)
             ]
         elif suffix == "docx":
-            if not zipfile.is_zipfile(io.BytesIO(content)):
-                raise ProcessingError("Document content is not a valid DOCX file.")
+            if not has_safe_docx_archive(content):
+                raise ProcessingError("Document content is not a valid or safe DOCX file.")
             document = WordDocument(io.BytesIO(content))
             text = "\n".join(paragraph.text for paragraph in document.paragraphs)
             sections = [ExtractedSection(_normalize_text(text))]
@@ -63,7 +63,7 @@ def extract_sections(filename: str, content: bytes) -> list[ExtractedSection]:
             sections = [ExtractedSection(_normalize_text(content.decode("utf-8-sig")))]
         else:
             raise ProcessingError("Unsupported document format.")
-    except (UnicodeDecodeError, zipfile.BadZipFile, ValueError) as error:
+    except (UnicodeDecodeError, ValueError) as error:
         raise ProcessingError("Document text could not be extracted.") from error
     except Exception as error:
         if isinstance(error, ProcessingError):

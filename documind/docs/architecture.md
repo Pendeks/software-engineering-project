@@ -11,7 +11,7 @@ This architecture is the Week 9 design baseline. Implementation details may be r
 | Original files | Private Azure Blob Storage in deployment; local filesystem behind the same storage interface in development | Separates file bytes from application data while keeping local development inexpensive. |
 | Model access | Azure OpenAI behind separate embedding and chat provider interfaces | Allows the MVP to use managed models while keeping model-specific code out of API and retrieval logic. Model deployments and quotas must be confirmed before deployment. |
 | Processing jobs | PostgreSQL-backed job records and a separate worker process | Supports retryable ingestion without requiring a separate message broker for the MVP. |
-| Client | Browser client calling the API; framework selection deferred | Week 9 focuses on the backend and data pipelines. |
+| Client | React and TypeScript browser client built with Vite | Provides a typed, interactive document and question workflow while keeping the API deployable independently. |
 
 ## Architecture goals
 
@@ -29,6 +29,7 @@ The FastAPI service owns the HTTP API, request validation, authentication and au
 
 Initial API areas:
 
+- Workspaces: create and list workspaces for the authenticated user.
 - Documents: upload, list, inspect, delete, and request re-indexing.
 - Questions: submit a question scoped to a workspace and receive an answer with citations.
 - Health: process health and readiness checks that do not expose configuration or secrets.
@@ -36,6 +37,14 @@ Initial API areas:
 ### Ingestion worker
 
 The worker runs separately from the API but shares the same application code and database. It claims queued document jobs, processes them, and records success or a safe, user-visible failure state. A job is retryable, and repeated processing must not create duplicate chunks for the same document version. Processing claims have a 15-minute lease; stale claims can be re-queued after worker interruption.
+
+### Browser client
+
+The React/TypeScript client connects to the API through a Vite development proxy. A user pastes the local development bearer token into a connect form; the client retains it only in component memory and clears it on disconnect or page refresh. It lists authorized workspaces, creates a workspace, uploads supported documents, refreshes processing status, retries failed processing, deletes documents, submits questions, and displays cited excerpts. The browser does not persist credentials in local storage or expose storage keys. The frontend toolchain requires Node.js 20 or newer.
+
+### Container topology and health
+
+The multi-stage Docker build compiles the browser client and installs the Python API into a non-root runtime image. The same image starts either the API or the ingestion worker. The local Compose profile uses PostgreSQL with pgvector, a shared named upload volume, and a PostgreSQL health dependency for the API and worker. `/health/live` is a process liveness check; `/health/ready` performs a database query and confirms the upload directory is readable and writable. HTTP logs include a generated request ID, method, status, and duration, but not paths, prompts, file contents, tokens, or headers. This single-host local topology is not production HA; deployed environments should use managed PostgreSQL, private blob storage, managed secrets, monitoring/alerts, and durable backups.
 
 ### Persistence and model adapters
 
@@ -86,6 +95,7 @@ The MVP exposes `POST /api/v1/workspaces/{workspace_id}/questions`. Its response
 - The current local scaffold uses one configured bearer token mapped to one user identity. This supports local workflow testing only; it is not a substitute for per-user production authentication or workspace invitations.
 - Keep uploaded objects private and use short-lived, authorization-checked access if file download is added.
 - Validate file size, extension, detected content type, and parser outcomes. Do not trust client-provided MIME types.
+- Bound DOCX archive entry counts and total uncompressed size both at upload validation and before extraction to reduce decompression-bomb risk.
 - Deletion first records a `deleting` state, removes the stored object, and then removes its metadata. If storage deletion fails, the document remains listed as `delete_failed` so an authorized user can retry; if metadata removal fails after the object is removed, the `deleting` record can also be retried safely.
 - Treat source documents and retrieved passages as untrusted content to mitigate prompt injection.
 - Never log file contents, extracted text, full prompts, embedding vectors, credentials, or access tokens.
@@ -103,7 +113,7 @@ The MVP exposes `POST /api/v1/workspaces/{workspace_id}/questions`. Its response
 
 ## Deployment shape
 
-The initial cloud topology consists of the FastAPI API, a worker process using the same application image, PostgreSQL with pgvector, private Azure Blob Storage, and Azure OpenAI deployments. The API and worker may be deployed as separate container workloads. Confirm Azure model availability, student subscription quota, and expected cost before provisioning. Local document-management development uses SQLite and filesystem storage without Azure credentials; retrieval and embeddings remain out of scope until later milestones.
+The initial cloud topology consists of the FastAPI API, a worker process using the same application image, PostgreSQL with pgvector, private Azure Blob Storage, and Azure OpenAI deployments. The API and worker may be deployed as separate container workloads. Confirm Azure model availability, student subscription quota, and expected cost before provisioning. Local document-management development uses SQLite and filesystem storage without Azure credentials; retrieval and answer generation require configured model deployments, while automated tests use explicit fake providers.
 
 ## Scope by milestone
 
@@ -112,5 +122,5 @@ The initial cloud topology consists of the FastAPI API, a worker process using t
 - Week 11: implement PDF/DOCX/text extraction, source-aware chunking, 1536-dimensional embeddings, and a retryable worker queue with stale-claim recovery.
 - Week 12: implement authorized retrieval, grounded generation, and citation responses.
 - Week 13: harden authorization, upload validation, prompt-injection handling, and quality tests.
-- Week 14: implement the browser experience.
+- Week 14: implement the React browser experience for workspace/document management and cited question answering.
 - Week 15: deploy and add operational monitoring.

@@ -1,18 +1,19 @@
 import hashlib
 import hmac
-import io
 import logging
-import zipfile
+import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.staticfiles import StaticFiles
 
 from documind.answering import (
     AnsweringError,
@@ -28,6 +29,8 @@ from documind.database import (
     initialize_schema,
     session_dependency,
 )
+from documind.document_validation import has_safe_docx_archive
+from documind.embeddings import AzureOpenAIEmbeddingProvider
 from documind.models import (
     Document,
     DocumentVersion,
@@ -39,7 +42,6 @@ from documind.models import (
 from documind.processing import EmbeddingProvider
 from documind.retrieval import RetrievalError
 from documind.storage import LocalFileStorage
-from documind.embeddings import AzureOpenAIEmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +148,33 @@ def create_app(
     def get_session():
         yield from session_dependency(session_factory)
 
+    @app.middleware("http")
+    async def log_request(request: Request, call_next):
+        request_id = uuid4().hex
+        started_at = time.perf_counter()
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-Request-ID"] = request_id
+            return response
+        except Exception:
+            logger.exception(
+                "http_request_failed request_id=%s method=%s",
+                request_id,
+                request.method,
+            )
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            logger.info(
+                "http_request_completed request_id=%s method=%s status_code=%s duration_ms=%.2f",
+                request_id,
+                request.method,
+                status_code,
+                duration_ms,
+            )
+
     def current_user(authorization: str | None = Header(default=None)) -> str:
         configured_token = app_settings.api_token
         if configured_token is None or not configured_token.get_secret_value():
@@ -182,8 +211,35 @@ def create_app(
         return workspace
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    @app.get("/health/live")
+    def health_live() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def health_ready() -> dict[str, str]:
+        try:
+            with db_engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            storage_ready = (
+                file_storage.root.is_dir()
+                and os.access(file_storage.root, os.R_OK | os.W_OK)
+            )
+        except (OSError, SQLAlchemyError) as error:
+            logger.error(
+                "readiness_check_failed error_type=%s",
+                type(error).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Required service is unavailable.",
+            ) from error
+
+        if not storage_ready:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Required service is unavailable.",
+            )
+        return {"status": "ready"}
 
     @app.post(
         "/api/v1/workspaces",
@@ -207,6 +263,25 @@ def create_app(
             session.rollback()
             logger.exception("workspace_create_failed")
             raise HTTPException(status_code=503, detail="Workspace could not be created.")
+
+    @app.get(
+        "/api/v1/workspaces",
+        response_model=list[WorkspaceResponse],
+    )
+    def list_workspaces(
+        session: Session = Depends(get_session),
+        user_id: str = Depends(current_user),
+    ) -> list[WorkspaceResponse]:
+        workspaces = session.scalars(
+            select(Workspace)
+            .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+            .where(WorkspaceMember.user_id == user_id)
+            .order_by(Workspace.name, Workspace.id)
+        )
+        return [
+            WorkspaceResponse(id=workspace.id, name=workspace.name)
+            for workspace in workspaces
+        ]
 
     @app.post(
         "/api/v1/workspaces/{workspace_id}/documents",
@@ -462,6 +537,17 @@ def create_app(
             logger.exception("document_metadata_delete_failed")
             raise HTTPException(status_code=503, detail="Document metadata could not be deleted.")
 
+    if app_settings.web_static_path is not None:
+        index_path = app_settings.web_static_path / "index.html"
+        if index_path.is_file():
+            app.mount(
+                "/",
+                StaticFiles(directory=app_settings.web_static_path, html=True),
+                name="web",
+            )
+        else:
+            logger.warning("web_static_assets_unavailable")
+
     return app
 
 
@@ -478,11 +564,7 @@ def _validate_content(extension: str, content: bytes) -> None:
     if extension == ".pdf":
         valid = b"%PDF-" in content[:1024]
     elif extension == ".docx":
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as archive:
-                valid = "word/document.xml" in archive.namelist()
-        except zipfile.BadZipFile:
-            valid = False
+        valid = has_safe_docx_archive(content)
     else:
         try:
             content.decode("utf-8")

@@ -34,7 +34,7 @@ General-purpose AI assistants may also analyze uploaded files. DocuMind's intend
 - Private Azure Blob Storage for original files
 - Azure OpenAI behind embedding and chat provider interfaces
 - Separate API and ingestion worker processes
-- Browser frontend framework to be selected in a later milestone
+- React and Vite browser frontend
 - Docker
 - Azure hosting
 - GitHub Actions
@@ -56,7 +56,7 @@ uvicorn documind.main:app --reload --app-dir src
 
 The local default stores metadata in `var/documind.db` and private file bytes in `var/uploads/`. Settings can also be read from a local `.env` file based on `.env.example`. The token is required for document and workspace APIs; the current local setup maps that one token to one configured user identity. It is a development scaffold, not production authentication. Do not expose it publicly or reuse a real credential. Production requires per-user authentication and authorization.
 
-Documents can be listed and inspected only within an authorized workspace. Deletion records progress and keeps failed deletions retryable; upload validation rejects unsupported, mismatched, empty, or oversized files.
+Documents can be listed and inspected only within an authorized workspace. Deletion records progress and keeps failed deletions retryable; upload validation rejects unsupported, mismatched, empty, or oversized files. DOCX archives are also checked for excessive expanded size and entry count before parsing, to reduce decompression-bomb risk.
 
 Uploads are queued for processing automatically. Configure `DOCUMIND_AZURE_OPENAI_ENDPOINT`, `DOCUMIND_AZURE_OPENAI_API_KEY`, and `DOCUMIND_AZURE_OPENAI_EMBEDDING_DEPLOYMENT` (a deployment returning 1536 dimensions) in `.env`; do not commit that file. Start the worker in a second terminal:
 
@@ -92,6 +92,33 @@ $question
 ```
 
 Run the focused API and processing tests with `python -m pytest`.
+
+## Browser experience
+
+Requires Node.js 20 or newer. In another terminal, install the frontend dependencies once and start the Vite development server:
+
+```powershell
+Set-Location web
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`. The development server proxies API requests to `http://127.0.0.1:8000`. Paste the bearer token configured for the API to connect; the browser holds it in memory only and clears it when disconnected or refreshed. Create or select a workspace, upload documents, follow indexing status, and ask questions against ready documents with source excerpts.
+
+## Containerized local deployment
+
+Docker Desktop with Docker Compose v2 is required. From this directory, create a local environment file and set fresh, random values for the API token and local PostgreSQL password in the current PowerShell session:
+
+```powershell
+Copy-Item .env.example .env
+$env:DOCUMIND_API_TOKEN = [guid]::NewGuid().ToString("N")
+$env:DOCUMIND_POSTGRES_PASSWORD = [guid]::NewGuid().ToString("N")
+docker compose up --build
+```
+
+Open `http://127.0.0.1:8000`. The compose stack runs PostgreSQL with pgvector, the API (including the built browser app), and the ingestion worker. Uploaded files and database data are held in local named volumes. Use `docker compose logs -f api worker` to inspect service logs; do not publish these development services directly to the internet. Stop them with `docker compose down`; persistent volumes remain until explicitly removed.
+
+The container image runs as a non-root user and exposes `/health/live` and `/health/ready`. Readiness checks the database connection and local upload storage. This compose setup is a local demonstration topology, not a highly available production deployment: production should use managed PostgreSQL, private blob storage, secret management, and an explicit backup/retention plan.
 
 ## Planned milestones
 

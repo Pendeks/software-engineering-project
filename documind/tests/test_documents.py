@@ -17,8 +17,10 @@ from pypdf.generic import (
     NameObject,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+import documind.api as api_module
 from documind.api import create_app
 from documind.answering import (
     AnsweringError,
@@ -27,6 +29,7 @@ from documind.answering import (
 )
 from documind.config import Settings
 from documind.database import create_database_engine, create_session_factory
+from documind.document_validation import has_safe_docx_archive
 from documind.embeddings import AzureOpenAIEmbeddingProvider
 from documind.models import Chunk, Document, DocumentVersion, ProcessingJob
 from documind.processing import (
@@ -57,6 +60,12 @@ class FakeChatProvider:
     def generate_answer(self, question: str, sources: Sequence[RetrievedSource]) -> str:
         self.calls.append((question, [source.filename for source in sources]))
         return self.answer
+
+
+class FailingChatProvider:
+    def generate_answer(self, question: str, sources: Sequence[RetrievedSource]) -> str:
+        del question, sources
+        raise RuntimeError("private upstream details")
 
 
 @dataclass
@@ -201,6 +210,33 @@ def test_upload_rejects_oversize_file_and_invalid_workspace(client):
     assert list(storage_path.iterdir()) == []
 
 
+def test_upload_rejects_docx_archive_over_expansion_limit(client, monkeypatch):
+    workspace_id = make_workspace(client.client)
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", "x" * 2048)
+    monkeypatch.setattr(
+        api_module,
+        "has_safe_docx_archive",
+        lambda value: has_safe_docx_archive(value, max_uncompressed_bytes=1024),
+    )
+
+    response = client.client.post(
+        f"/api/v1/workspaces/{workspace_id}/documents",
+        headers=auth_headers(client.settings),
+        files={
+            "file": (
+                "oversized-expansion.docx",
+                content.getvalue(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert response.status_code == 415
+    assert list(client.storage_path.iterdir()) == []
+
+
 def test_document_delete_removes_storage_and_metadata(client):
     test_client = client.client
     storage_path = client.storage_path
@@ -239,6 +275,88 @@ def test_document_endpoints_require_bearer_token(client):
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_live_and_readiness_checks_report_status_and_request_id(
+    client, monkeypatch, tmp_path, caplog
+):
+    caplog.set_level("INFO", logger="documind.api")
+    live = client.client.get("/health/live?token=private-query-value")
+    ready = client.client.get("/health/ready")
+
+    assert live.status_code == 200
+    assert live.json() == {"status": "ok"}
+    assert len(live.headers["x-request-id"]) == 32
+    assert "http_request_completed" in caplog.text
+    assert "status_code=200" in caplog.text
+    assert "private-query-value" not in caplog.text
+    assert "test-token" not in caplog.text
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready"}
+
+    engine = client.client.app.state.engine
+
+    def database_unavailable():
+        raise SQLAlchemyError("private database detail")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(engine, "connect", database_unavailable)
+        database_failed = client.client.get("/health/ready")
+    assert database_failed.status_code == 503
+    assert "private database detail" not in database_failed.text
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(client.storage, "root", tmp_path / "missing-storage")
+        storage_failed = client.client.get("/health/ready")
+    assert storage_failed.status_code == 503
+    assert "missing-storage" not in storage_failed.text
+
+
+def test_workspace_list_only_returns_workspaces_for_authenticated_user(client):
+    test_client = client.client
+    owned_workspace = make_workspace(test_client)
+    other_settings = client.settings.model_copy(update={"api_token_subject": "other-user"})
+    other_app = create_app(settings=other_settings, storage=client.storage)
+
+    with TestClient(other_app) as other_client:
+        created = other_client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(other_settings),
+            json={"name": "Other workspace"},
+        )
+        assert created.status_code == 201
+        other_workspace = created.json()["id"]
+
+    listed = test_client.get(
+        "/api/v1/workspaces",
+        headers=auth_headers(client.settings),
+    )
+
+    assert listed.status_code == 200
+    assert [workspace["id"] for workspace in listed.json()] == [owned_workspace]
+    assert other_workspace not in {workspace["id"] for workspace in listed.json()}
+
+
+def test_app_serves_built_frontend_when_configured(client, tmp_path):
+    web_root = tmp_path / "web"
+    web_root.mkdir()
+    (web_root / "index.html").write_text(
+        "<!doctype html><title>DocuMind UI</title>",
+        encoding="utf-8",
+    )
+    settings = client.settings.model_copy(update={"web_static_path": web_root})
+    app = create_app(
+        settings=settings,
+        storage=client.storage,
+    )
+
+    with TestClient(app) as web_client:
+        page = web_client.get("/")
+        health = web_client.get("/health/live")
+
+    assert page.status_code == 200
+    assert "DocuMind UI" in page.text
+    assert health.status_code == 200
 
 
 def test_document_access_is_scoped_to_workspace_members(client):
@@ -376,6 +494,22 @@ def test_pdf_and_docx_text_extraction():
     assert "PDF text extraction works." in pdf_sections[0].text
     assert pdf_sections[0].page_number == 1
     assert "DOCX text extraction works." in docx_sections[0].text
+
+
+def test_docx_archive_expansion_and_entry_count_are_bounded():
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", "x" * 2048)
+
+    assert not has_safe_docx_archive(content.getvalue(), max_uncompressed_bytes=1024)
+    assert has_safe_docx_archive(content.getvalue(), max_uncompressed_bytes=4096)
+
+    many_entries = io.BytesIO()
+    with zipfile.ZipFile(many_entries, "w") as archive:
+        archive.writestr("word/document.xml", "<document/>")
+        for index in range(1000):
+            archive.writestr(f"word/media/image-{index}.bin", b"x")
+    assert not has_safe_docx_archive(many_entries.getvalue())
 
 
 def test_upload_queues_job_and_worker_persists_chunks_and_embeddings(client):
@@ -671,6 +805,20 @@ def test_question_abstains_without_relevant_ready_sources(client):
     assert client.chat_provider.calls == []
 
 
+def test_question_rejects_blank_input_without_calling_providers(client):
+    workspace_id = make_workspace(client.client)
+
+    response = client.client.post(
+        f"/api/v1/workspaces/{workspace_id}/questions",
+        headers=auth_headers(client.settings),
+        json={"question": " \t "},
+    )
+
+    assert response.status_code == 422
+    assert client.embedding_provider.calls == []
+    assert client.chat_provider.calls == []
+
+
 def test_question_abstains_below_similarity_threshold(client):
     workspace_id = make_workspace(client.client)
     uploaded = client.client.post(
@@ -728,6 +876,48 @@ def test_question_rejects_uncited_model_output(client):
     assert response.json()["answer"] == INSUFFICIENT_EVIDENCE
     assert response.json()["abstained"] is True
     assert response.json()["citations"] == []
+
+
+def test_question_rejects_unknown_citation_and_hides_provider_errors(client):
+    workspace_id = make_workspace(client.client)
+    uploaded = client.client.post(
+        f"/api/v1/workspaces/{workspace_id}/documents",
+        headers=auth_headers(client.settings),
+        files={"file": ("facts.txt", b"A source fact.", "text/plain")},
+    )
+    assert uploaded.status_code == 201
+    assert process_next_job(
+        client.session_factory,
+        client.storage,
+        FakeEmbeddingProvider(),
+        client.settings,
+    )
+    client.chat_provider.answer = "An unsupported result [99]."
+
+    invalid_citation = client.client.post(
+        f"/api/v1/workspaces/{workspace_id}/questions",
+        headers=auth_headers(client.settings),
+        json={"question": "What is the source fact?"},
+    )
+
+    assert invalid_citation.status_code == 200
+    assert invalid_citation.json()["abstained"] is True
+    assert invalid_citation.json()["citations"] == []
+
+    app = create_app(
+        settings=client.settings,
+        storage=client.storage,
+        embedding_provider=client.embedding_provider,
+        chat_provider=FailingChatProvider(),
+    )
+    with TestClient(app) as failing_client:
+        failed = failing_client.post(
+            f"/api/v1/workspaces/{workspace_id}/questions",
+            headers=auth_headers(client.settings),
+            json={"question": "What is the source fact?"},
+        )
+    assert failed.status_code == 503
+    assert "private upstream details" not in failed.text
 
 
 def test_question_requires_workspace_membership_before_embedding(client):

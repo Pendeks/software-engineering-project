@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     api_token_subject: str = "local-owner"
     database_url: str = "sqlite:///./var/documind.db"
     storage_path: Path = Path("var/uploads")
+    web_static_path: Path | None = None
     max_upload_bytes: int = 10 * 1024 * 1024
     chunk_size: int = Field(default=1000, gt=0)
     chunk_overlap: int = Field(default=150, ge=0)
