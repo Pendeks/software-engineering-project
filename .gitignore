@@ -2,6 +2,11 @@
 **/node_modules/
 **/dist/
 **/coverage/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/*.egg-info/
+documind/var/
 
 # Environment variables and secrets
 .env

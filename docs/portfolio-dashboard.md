@@ -3,10 +3,10 @@
 ## Current status
 
 - Overall status: In progress
-- Current week: Week 9 of 26
+- Current week: Week 12 of 26
 - Current project: DocuMind
-- Current phase: AI architecture and pipelines
-- Goal: define DocuMind's document-processing and retrieval architecture
+- Current phase: Permission-filtered retrieval and grounded answers
+- Goal: answer workspace-scoped questions with relevant, traceable source citations
 
 ## Status legend
 
@@ -23,7 +23,7 @@
 |---|---|---|
 | Portfolio Foundation | 🟢 Done | Week 1 |
 | FlowDesk | 🟢 Done | Weeks 2-8 |
-| DocuMind | 🔵 Todo | Weeks 9-15 |
+| DocuMind | 🟡 In Progress | Weeks 9-15 |
 | DeployFlow | ⚪ Backlog | Weeks 16-21 |
 | Cross-Project Observability | ⚪ Backlog | Weeks 22-24 |
 | Portfolio Polish | ⚪ Backlog | Weeks 25-26 |
@@ -40,10 +40,10 @@
 | 6 | Collaboration and search | 🟢 Done | Task comments, task search, and status filtering implemented. |
 | 7 | Frontend and testing | 🟢 Done | Login/dashboard, theme switching, responsive layout, status colors, and browser validation are complete; smoke tests pass. |
 | 8 | Deployment and observability | 🟢 Done | Temporary Linux F1 demo deployed in Indonesia Central. Reviewed 60 application requests with no logged errors, verified health/readiness, and deployed Admin/Manager/Member/Viewer authorization. The demo remains online for temporary use; delete its resource group when finished. |
-| 9 | DocuMind AI architecture and pipelines | 🔵 Todo | Choose the backend stack and define the document intelligence architecture. |
-| 10 | DocuMind document management and storage | ⚪ Backlog | Implement document upload and storage workflows. |
-| 11 | DocuMind processing and embeddings | ⚪ Backlog | Build document extraction and embedding workflows. |
-| 12 | DocuMind RAG MVP | ⚪ Backlog | Deliver retrieval-augmented question answering. |
+| 9 | DocuMind AI architecture and pipelines | 🟢 Done | Selected Python/FastAPI, PostgreSQL/pgvector, private Azure Blob Storage, and Azure OpenAI behind provider interfaces; documented pipeline and access boundaries. |
+| 10 | DocuMind document management and storage | 🟢 Done | Added workspace-scoped document APIs, private local storage, metadata, upload validation, retryable deletion, and PDF/DOCX plus isolation/failure tests. |
+| 11 | DocuMind processing and embeddings | 🟣 Review | Added PDF/DOCX/text extraction, source-offset chunking, a queued/retryable worker, Azure OpenAI embeddings, pgvector persistence, stale-job recovery, and 17 processing tests. Live Azure/PostgreSQL validation remains pending credentials and infrastructure. |
+| 12 | DocuMind RAG MVP | 🟡 In Progress | Added authorized workspace-filtered cosine retrieval, an Azure OpenAI chat adapter, citation validation, abstention behavior, and question API tests. |
 | 13 | DocuMind security and quality | ⚪ Backlog | Add security controls and quality checks. |
 | 14 | DocuMind user experience and UI | ⚪ Backlog | Build and validate the user-facing experience. |
 | 15 | DocuMind deployment and monitoring | ⚪ Backlog | Deploy the application and add monitoring. |
@@ -61,5 +61,5 @@
 
 ## Immediate next tasks
 
-1. Choose DocuMind's backend stack and architecture for ingestion, retrieval, and grounded answers.
+1. Evaluate retrieval thresholds and verify ingestion and question answering against configured Azure OpenAI and PostgreSQL deployments.
 2. Delete the FlowDesk demo resource group when the temporary demo is no longer needed.
