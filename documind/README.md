@@ -118,6 +118,12 @@ docker compose up --build
 
 Open `http://127.0.0.1:8000`. The compose stack runs PostgreSQL with pgvector, the API (including the built browser app), and the ingestion worker. Uploaded files and database data are held in local named volumes. Use `docker compose logs -f api worker` to inspect service logs; do not publish these development services directly to the internet. Stop them with `docker compose down`; persistent volumes remain until explicitly removed.
 
+To connect the browser, retrieve the local token from `.env` in PowerShell and paste it into the connect form:
+
+```powershell
+(Get-Content .env | Where-Object { $_ -match '^DOCUMIND_API_TOKEN=' } | Select-Object -Last 1) -replace '^DOCUMIND_API_TOKEN=', ''
+```
+
 The container image runs as a non-root user and exposes `/health/live` and `/health/ready`. Readiness checks the database connection and local upload storage. This compose setup is a local demonstration topology, not a highly available production deployment: production should use managed PostgreSQL, private blob storage, secret management, and an explicit backup/retention plan.
 
 ## Planned milestones

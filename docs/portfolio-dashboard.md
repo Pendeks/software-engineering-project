@@ -3,10 +3,10 @@
 ## Current status
 
 - Overall status: In progress
-- Current week: Week 14 of 26
+- Current week: Week 15 of 26
 - Current project: DocuMind
-- Current phase: User experience and UI
-- Goal: build a browser workflow for managing documents and asking cited questions
+- Current phase: Deployment and monitoring
+- Goal: run and verify DocuMind as a local containerized API, browser app, database, and worker
 
 ## Status legend
 
@@ -45,8 +45,8 @@
 | 11 | DocuMind processing and embeddings | 🟣 Review | Added PDF/DOCX/text extraction, source-offset chunking, a queued/retryable worker, Azure OpenAI embeddings, pgvector persistence, stale-job recovery, and 17 processing tests. Live Azure/PostgreSQL validation remains pending credentials and infrastructure. |
 | 12 | DocuMind RAG MVP | 🟣 Review | Added authorized workspace-filtered cosine retrieval, an Azure OpenAI chat adapter, citation validation, abstention behavior, and question API tests. Live Azure/PostgreSQL evaluation remains pending credentials and infrastructure. |
 | 13 | DocuMind security and quality | 🟢 Done | Added DOCX archive expansion/entry-count limits and regression coverage for untrusted-provider errors, citation rejection, and invalid questions; the full DocuMind suite passes 28 tests. |
-| 14 | DocuMind user experience and UI | 🟡 In Progress | Built the React + TypeScript + Vite workspace/document/question interface; browser-smoke-tested connection, workspace creation and file upload at desktop and 375px viewport widths. Live model-backed answering remains pending configured Azure services. |
-| 15 | DocuMind deployment and monitoring | 🟡 In Progress | Added a non-root multi-stage image, local Compose topology with PostgreSQL/pgvector and worker, database/storage readiness checks, and request-ID/duration logs. Docker CLI is not installed here, so image execution remains unverified. |
+| 14 | DocuMind user experience and UI | 🟣 Review | Built the React + TypeScript + Vite workspace/document/question interface; browser-smoke-tested connection, workspace creation and file upload at desktop and 375px viewport widths. Live model-backed answering remains pending configured Azure services. |
+| 15 | DocuMind deployment and monitoring | 🟡 In Progress | Installed Docker Desktop and verified Docker/Compose; built and ran the local Compose stack with healthy API/PostgreSQL and running worker, non-root containers, readiness checks, and request-ID logs. Azure deployment remains separate and unverified. |
 | 16 | DeployFlow CI workflow | ⚪ Backlog | Establish continuous integration. |
 | 17 | DeployFlow Docker and registry | ⚪ Backlog | Containerize the app and configure an image registry. |
 | 18 | DeployFlow infrastructure as code | ⚪ Backlog | Provision cloud resources as code. |
@@ -61,5 +61,5 @@
 
 ## Immediate next tasks
 
-1. Install Docker Desktop to build and run DocuMind's local deployment stack, then review production Azure hosting requirements.
+1. Configure Azure model services for live end-to-end question-answering; then continue to the DeployFlow CI milestone.
 2. Delete the FlowDesk demo resource group when the temporary demo is no longer needed.
