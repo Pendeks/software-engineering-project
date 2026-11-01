@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import request from 'supertest';
 
 import { app } from '../src/server';
@@ -17,6 +18,14 @@ async function run() {
   assert.equal(dashboardPageResponse.status, 200);
   assert.match(dashboardPageResponse.text, /id="projectList"/);
   assert.doesNotMatch(dashboardPageResponse.text, /id="loginForm"/);
+  const escapeHtmlSource = dashboardPageResponse.text.match(/function escapeHtml\(value\) \{[\s\S]*?\n      \}/);
+  assert.ok(escapeHtmlSource);
+  const escapeHtml = vm.runInNewContext(`(() => { ${escapeHtmlSource[0]}; return escapeHtml; })()`) as (value: string) => string;
+  assert.equal(escapeHtml(`<img src=x onerror="alert(1)"> & 'text'`), '&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &#39;text&#39;');
+  assert.match(dashboardPageResponse.text, /\$\{escapeHtml\(project\.name\)\}/);
+  assert.match(dashboardPageResponse.text, /\$\{escapeHtml\(project\.owner\)\}/);
+  assert.match(dashboardPageResponse.text, /\$\{escapeHtml\(task\.title\)\}/);
+  assert.match(dashboardPageResponse.text, /\$\{escapeHtml\(comment\)\}/);
 
   const healthResponse = await request(app).get('/api/health');
   assert.equal(healthResponse.status, 200);

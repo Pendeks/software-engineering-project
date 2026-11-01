@@ -30,6 +30,34 @@ DeployFlow is a cloud and DevOps deployment platform designed to demonstrate CI/
 - Production pipeline
 - Deployment automation and reliability
 
+## Continuous integration
+
+The repository's GitHub Actions workflow is [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs on pushes and pull requests that change FlowDesk or DocuMind, and can also be started manually.
+
+The independent jobs run FlowDesk's build and smoke tests plus a production dependency audit, DocuMind's Python API and processing tests, and the DocuMind web dependency audit and production build. Each job uses a least-privilege read-only repository token. CI does not deploy to Azure, publish images, or require cloud secrets.
+
+While validating the web build for CI, the dependency audit identified a high-severity Vite advisory. The lockfile now resolves Vite 6.4.5, and the full web dependency audit reports zero vulnerabilities.
+
+To run the same checks locally:
+
+```powershell
+Push-Location ..\flowdesk
+npm ci
+npm test
+npm audit --omit=dev
+Pop-Location
+
+Push-Location ..\documind
+python -m pip install -e ".[test]"
+python -m pytest
+Pop-Location
+
+Push-Location ..\documind\web
+npm ci
+npm run build
+Pop-Location
+```
+
 ## Project docs
 
 Planned documentation includes:

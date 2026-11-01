@@ -796,6 +796,16 @@
         return statusClasses[String(status).trim().toLowerCase()] || 'status-neutral';
       }
 
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (character) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        })[character]);
+      }
+
       function renderProjectList(projects) {
         const list = document.getElementById('projectList');
         if (!projects.length) {
@@ -808,11 +818,11 @@
             <li>
               <div class="project-item-row">
                 <div>
-                  <strong>${project.name}</strong>
-                  <div class="muted">${project.owner}</div>
-                  <span class="status-pill ${getStatusClass(project.status)}">${project.status}</span>
+                  <strong>${escapeHtml(project.name)}</strong>
+                  <div class="muted">${escapeHtml(project.owner)}</div>
+                  <span class="status-pill ${getStatusClass(project.status)}">${escapeHtml(project.status)}</span>
                 </div>
-                ${['Admin', 'Manager'].includes(currentRole) ? `<button type="button" class="secondary project-edit-button" data-project-id="${project.id}">Edit</button>` : ''}
+                ${['Admin', 'Manager'].includes(currentRole) ? `<button type="button" class="secondary project-edit-button" data-project-id="${escapeHtml(project.id)}">Edit</button>` : ''}
               </div>
             </li>
           `)
@@ -860,20 +870,20 @@
             <li>
               <div class="task-item-row">
                 <div class="task-item-main">
-                  <strong>${task.title}</strong>
+                  <strong>${escapeHtml(task.title)}</strong>
                   <div class="task-meta">
-                    <span>${task.assignee || 'Unassigned'}</span>
-                    <span class="status-pill ${getStatusClass(task.status)}">${task.status}</span>
+                    <span>${escapeHtml(task.assignee || 'Unassigned')}</span>
+                    <span class="status-pill ${getStatusClass(task.status)}">${escapeHtml(task.status)}</span>
                   </div>
-                  ${currentRole === 'Admin' || currentRole === 'Manager' || (currentRole === 'Member' && task.assignee === currentUserName) ? `<button type="button" class="secondary task-edit-button" data-task-id="${task.id}">Edit</button>` : ''}
+                  ${currentRole === 'Admin' || currentRole === 'Manager' || (currentRole === 'Member' && task.assignee === currentUserName) ? `<button type="button" class="secondary task-edit-button" data-task-id="${escapeHtml(task.id)}">Edit</button>` : ''}
                 </div>
               </div>
 
               <div class="task-comments">
                 <div class="task-comment-list">
-                  ${(task.comments && task.comments.length ? task.comments.slice(-3).map((comment) => `<div>• ${comment}</div>`).join('') : '<div class="muted">No comments yet.</div>')}
+                  ${(task.comments && task.comments.length ? task.comments.slice(-3).map((comment) => `<div>• ${escapeHtml(comment)}</div>`).join('') : '<div class="muted">No comments yet.</div>')}
                 </div>
-                ${currentRole === 'Viewer' ? '' : `<form class="task-comment-form" data-task-id="${task.id}">
+                ${currentRole === 'Viewer' ? '' : `<form class="task-comment-form" data-task-id="${escapeHtml(task.id)}">
                   <input type="text" name="commentText" placeholder="Add a quick update" maxlength="180" />
                   <button type="submit" class="secondary">Comment</button>
                 </form>`}
@@ -932,7 +942,7 @@
         activeProjectId = projects.some((project) => project.id === previousValue) ? previousValue : projects[0].id;
 
         select.innerHTML = projects
-          .map((project) => `<option value="${project.id}" ${project.id === activeProjectId ? 'selected' : ''}>${project.name}</option>`)
+          .map((project) => `<option value="${escapeHtml(project.id)}" ${project.id === activeProjectId ? 'selected' : ''}>${escapeHtml(project.name)}</option>`)
           .join('');
       }
 

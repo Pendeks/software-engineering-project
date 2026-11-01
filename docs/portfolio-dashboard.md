@@ -3,10 +3,10 @@
 ## Current status
 
 - Overall status: In progress
-- Current week: Week 15 of 26
-- Current project: DocuMind
-- Current phase: Deployment and monitoring
-- Goal: run and verify DocuMind as a local containerized API, browser app, database, and worker
+- Current week: Week 16 of 26
+- Current project: DeployFlow
+- Current phase: Continuous integration
+- Goal: automatically validate project changes without cloud credentials or deployments
 
 ## Status legend
 
@@ -24,7 +24,7 @@
 | Portfolio Foundation | 🟢 Done | Week 1 |
 | FlowDesk | 🟢 Done | Weeks 2-8 |
 | DocuMind | 🟡 In Progress | Weeks 9-15 |
-| DeployFlow | ⚪ Backlog | Weeks 16-21 |
+| DeployFlow | 🟡 In Progress | Weeks 16-21 |
 | Cross-Project Observability | ⚪ Backlog | Weeks 22-24 |
 | Portfolio Polish | ⚪ Backlog | Weeks 25-26 |
 
@@ -39,15 +39,15 @@
 | 5 | Projects and tasks | 🟢 Done | Project and task create/update workflows implemented. |
 | 6 | Collaboration and search | 🟢 Done | Task comments, task search, and status filtering implemented. |
 | 7 | Frontend and testing | 🟢 Done | Login/dashboard, theme switching, responsive layout, status colors, and browser validation are complete; smoke tests pass. |
-| 8 | Deployment and observability | 🟢 Done | Temporary Linux F1 demo deployed in Indonesia Central. Reviewed 60 application requests with no logged errors, verified health/readiness, and deployed Admin/Manager/Member/Viewer authorization. The demo remains online for temporary use; delete its resource group when finished. |
+| 8 | Deployment and observability | 🟢 Done | Temporary Linux F1 demo deployed in Indonesia Central. Reviewed 60 application requests with no logged errors, verified health/readiness, and deployed Admin/Manager/Member/Viewer authorization. FlowDesk is still a direct Node.js App Service deployment; its Docker image now also builds and runs locally. |
 | 9 | DocuMind AI architecture and pipelines | 🟢 Done | Selected Python/FastAPI, PostgreSQL/pgvector, private Azure Blob Storage, and Azure OpenAI behind provider interfaces; documented pipeline and access boundaries. |
 | 10 | DocuMind document management and storage | 🟢 Done | Added workspace-scoped document APIs, private local storage, metadata, upload validation, retryable deletion, and PDF/DOCX plus isolation/failure tests. |
 | 11 | DocuMind processing and embeddings | 🟣 Review | Added PDF/DOCX/text extraction, source-offset chunking, a queued/retryable worker, Azure OpenAI embeddings, pgvector persistence, stale-job recovery, and 17 processing tests. Live Azure/PostgreSQL validation remains pending credentials and infrastructure. |
 | 12 | DocuMind RAG MVP | 🟣 Review | Added authorized workspace-filtered cosine retrieval, an Azure OpenAI chat adapter, citation validation, abstention behavior, and question API tests. Live Azure/PostgreSQL evaluation remains pending credentials and infrastructure. |
 | 13 | DocuMind security and quality | 🟢 Done | Added DOCX archive expansion/entry-count limits and regression coverage for untrusted-provider errors, citation rejection, and invalid questions; the full DocuMind suite passes 28 tests. |
 | 14 | DocuMind user experience and UI | 🟣 Review | Built the React + TypeScript + Vite workspace/document/question interface; browser-smoke-tested connection, workspace creation and file upload at desktop and 375px viewport widths. Live model-backed answering remains pending configured Azure services. |
-| 15 | DocuMind deployment and monitoring | 🟡 In Progress | Installed Docker Desktop and verified Docker/Compose; built and ran the local Compose stack with healthy API/PostgreSQL and running worker, non-root containers, readiness checks, and request-ID logs. Azure deployment remains separate and unverified. |
-| 16 | DeployFlow CI workflow | ⚪ Backlog | Establish continuous integration. |
+| 15 | DocuMind deployment and monitoring | 🟣 Review | Installed Docker Desktop and verified Docker/Compose; built and ran the local Compose stack with healthy API/PostgreSQL and running worker, non-root containers, readiness checks, and request-ID logs. Live Azure model-backed processing and Q&A remain blocked by the Azure for Students subscription's resource-region policy. |
+| 16 | DeployFlow CI workflow | 🟡 In Progress | Added GitHub Actions jobs for FlowDesk tests and production dependency audit, DocuMind API tests, and DocuMind web build. Azure deployment and image publishing are intentionally excluded. |
 | 17 | DeployFlow Docker and registry | ⚪ Backlog | Containerize the app and configure an image registry. |
 | 18 | DeployFlow infrastructure as code | ⚪ Backlog | Provision cloud resources as code. |
 | 19 | DeployFlow CD workflow | ⚪ Backlog | Automate continuous deployment. |
@@ -61,5 +61,5 @@
 
 ## Immediate next tasks
 
-1. Configure Azure model services for live end-to-end question-answering; then continue to the DeployFlow CI milestone.
+1. Push the CI workflow and confirm the GitHub Actions jobs pass; then continue to the DeployFlow Docker and registry milestone.
 2. Delete the FlowDesk demo resource group when the temporary demo is no longer needed.

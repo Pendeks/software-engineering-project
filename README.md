@@ -44,15 +44,15 @@ See [docs/roadmap.md](docs/roadmap.md) for the full 26-week plan and milestones.
 
 ## Current status
 
-- Current week: 9 of 26
-- Current phase: DocuMind — AI architecture and pipelines
-- FlowDesk status: Complete for Weeks 2-8; deployed as a temporary, non-containerized demo on Linux App Service F1 in Indonesia Central.
+- Current week: 16 of 26
+- Current phase: DeployFlow — continuous integration
+- FlowDesk status: Weeks 2-8 complete. The temporary public demo uses a direct Node.js deployment on Linux App Service F1 in Indonesia Central; a local Docker image is built and verified separately.
 - Implemented: Demo authentication, Admin/Manager/Member/Viewer authorization with project scoping, separate login and dashboard pages, project and task management, search, status filtering, comments, and theme switching.
-- Current prototype stack: TypeScript, Express, plain HTML/CSS/JavaScript, and in-memory data; Azure demo target is Linux App Service with Node.js 22 LTS.
-- Validation: FlowDesk build and authorization smoke tests pass; role-specific dashboard visibility and the deployed role boundaries were verified.
+- Current prototype stack: TypeScript, Express, plain HTML/CSS/JavaScript, in-memory data, and Docker for local runs.
+- Validation: FlowDesk tests pass; production dependency audit reports zero vulnerabilities; local Docker image and readiness endpoint verified. Stored-XSS fix deployed to the demo; Chrome Safe Browsing clearance remains unconfirmed.
 - Live demo: [FlowDesk sign-in](https://flowdesk-demo-399203.azurewebsites.net/)
-- Next milestone: Define DocuMind's backend stack and architecture for document ingestion and retrieval.
-- DocuMind and DeployFlow: Not started.
+- DocuMind: Local API, worker, database, and browser app implemented and run with Docker Compose; live Azure model-backed processing is blocked by the Azure for Students subscription's allowed-region policy.
+- Next milestone: GitHub Actions CI for FlowDesk and DocuMind, followed by DeployFlow Docker and registry work.
 
 ## Execution approach
 
