@@ -40,7 +40,13 @@ The worker runs separately from the API but shares the same application code and
 
 ### Browser client
 
-The React/TypeScript client connects to the API through a Vite development proxy. A user pastes the local development bearer token into a connect form; the client retains it only in component memory and clears it on disconnect or page refresh. It lists authorized workspaces, creates a workspace, uploads supported documents, refreshes processing status, retries failed processing, deletes documents, submits questions, and displays cited excerpts. The browser does not persist credentials in local storage or expose storage keys. The frontend toolchain requires Node.js 20 or newer.
+The React/TypeScript client connects to the API through a Vite development proxy. In local mode, a user pastes the development bearer token into a connect form; it remains in component memory and clears on disconnect or page refresh. In Entra mode, MSAL uses the configured single-tenant SPA and API scope, caches tokens in memory, and obtains an access token for each private API request. The browser never uses a client secret or persists tokens in local storage. Private mode lists authorized workspaces, creates a workspace, uploads supported documents, refreshes processing status, retries failed processing, deletes documents, submits questions, and displays cited excerpts. The frontend toolchain requires Node.js 20 or newer.
+
+### Authentication modes
+
+`DOCUMIND_AUTH_MODE=local` preserves the development bearer-token workflow. `DOCUMIND_AUTH_MODE=entra` enables API validation of single-tenant Entra access tokens against the configured tenant, client, and API audience. The browser build separately requires `VITE_DOCUMIND_AUTH_MODE` and, for Entra, the tenant ID, SPA client ID, API scope, and redirect URI. Production builds fail when the mode is omitted or Entra settings are incomplete. App registrations, exposed scopes, redirect URIs, and tenant consent are external deployment prerequisites; the application does not create or alter them.
+
+An external identity is keyed by token issuer and subject and maps to a stable internal user ID. Signing in with Entra does not copy local-token identity or workspace memberships.
 
 ### Container topology and health
 
@@ -50,21 +56,22 @@ The multi-stage Docker build compiles the browser client and installs the Python
 
 - PostgreSQL stores users, workspaces, memberships, documents, immutable document versions, processing jobs, chunks, embeddings, and conversation metadata in the deployed application. The current local API uses the same SQLAlchemy model layer with SQLite, storing vectors as JSON only in local mode.
 - pgvector stores searchable embeddings alongside chunk records and metadata.
-- A private blob container stores original files. The database stores blob keys, not public URLs.
-- A storage interface separates local development storage from Azure Blob Storage.
+- The database stores storage keys, not public URLs. Local development currently uses the local filesystem storage adapter; private Azure Blob Storage is a separate future milestone and is not included in the auth/demo changes.
+- A storage interface separates local development storage from the planned Azure Blob Storage adapter.
 - Embedding and chat interfaces isolate the application from Ollama HTTP and Azure OpenAI SDK details and allow deterministic fakes in tests. Nomic document and query inputs use their required `search_document:` and `search_query:` prefixes. Production errors must be surfaced; tests or local development must not silently return success-shaped model output.
 - The default embedding space is 768 dimensions. The database records the embedding model identity; startup fails with an explicit re-indexing error if the configured model differs while chunks exist or if legacy vectors cannot be verified. The schema migrates an older PostgreSQL vector column only when it contains no chunks. SQLite applies the same dimension guard.
 
 ## Data and access model
 
 - A user can belong to one or more workspaces.
+- Entra identities are linked to stable internal users by issuer and subject; this mapping does not copy local-token identity or workspace memberships.
 - Documents belong to a workspace and have an owner and processing status.
 - Each document version identifies the exact source content used to produce its chunks.
 - Chunks belong to a document version and retain source location metadata, such as page number and character offsets where available.
 - Embeddings belong to chunks. They are removed or superseded when a document is deleted or re-indexed.
 - Every list, retrieval, mutation, and citation lookup is scoped to a workspace the requesting user is authorized to access.
 
-Authorization is enforced server-side. The retrieval query must apply the authorized workspace/document filter before candidate passages are returned to application code or included in model context. A citation identifier must be resolved through the same authorization boundary; clients cannot use guessed IDs to access another workspace's source.
+Authorization is enforced server-side. The retrieval query must apply the authorized workspace/document filter before candidate passages are returned to application code or included in model context. A citation identifier must be resolved through the same authorization boundary; clients cannot use guessed IDs to access another workspace's source. Entra identities map to internal users but do not inherit another authentication mode's memberships.
 
 ## Document ingestion pipeline
 
@@ -92,8 +99,8 @@ The MVP exposes `POST /api/v1/workspaces/{workspace_id}/questions`. Its response
 
 ## Security and privacy
 
-- Require authentication for document and question APIs; enforce workspace membership and document scope on the server.
-- The current local scaffold uses one configured bearer token mapped to one user identity. This supports local workflow testing only; it is not a substitute for per-user production authentication or workspace invitations.
+- Require authentication for private document, workspace, and question APIs; enforce workspace membership and document scope on the server. The explicitly isolated recruiter-demo routes are the only anonymous exception.
+- The local scaffold uses one configured bearer token mapped to one user identity. This supports local workflow testing only; Entra mode provides per-user authentication but does not itself assign workspace memberships.
 - Keep uploaded objects private and use short-lived, authorization-checked access if file download is added.
 - Validate file size, extension, detected content type, and parser outcomes. Do not trust client-provided MIME types.
 - Bound DOCX archive entry counts and total uncompressed size both at upload validation and before extraction to reduce decompression-bomb risk.
@@ -103,6 +110,12 @@ The MVP exposes `POST /api/v1/workspaces/{workspace_id}/questions`. Its response
 - Keep secrets in environment-specific secret storage; use managed identity for Azure resource access where supported.
 - If Azure OpenAI is selected, use an embedding deployment that supports the requested 768 dimensions. Changing embedding models requires re-indexing existing documents; incompatible non-empty databases fail startup rather than mixing vector spaces.
 - Delete document chunks, embeddings, and stored originals when a document is deleted, and ensure re-indexing cannot expose stale unauthorized content.
+
+### Public demo
+
+The anonymous demo is pinned to the server-configured `DOCUMIND_DEMO_WORKSPACE_ID`, and that workspace must also be marked `is_public_demo`. Its documents must be synthetic. `GET /api/v1/demo/documents` and `POST /api/v1/demo/questions` accept no workspace identifier and query only that marked workspace; no anonymous upload, workspace mutation, delete, or retry operation is exposed. The seeder refuses to repurpose an existing private workspace.
+
+Both demo routes use an in-process fixed-window limit (30 requests per 60 seconds by default) keyed by the direct client address; forwarded headers are not trusted. This is a single-process development/portfolio safeguard, not a distributed limiter. Before exposure behind a reverse proxy, configure trusted-proxy client address handling. A shared limiter is required before scaling across API processes or instances.
 
 ## Observability and failure handling
 
@@ -125,3 +138,4 @@ The on-demand portfolio topology is local: FastAPI API, worker, PostgreSQL with 
 - Week 13: harden authorization, upload validation, prompt-injection handling, and quality tests.
 - Week 14: implement the React browser experience for workspace/document management and cited question answering.
 - Week 15: deploy and add operational monitoring.
+- Private Azure Blob Storage remains a separate future milestone; the current local filesystem adapter must not be described as production blob storage.
