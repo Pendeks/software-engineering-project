@@ -13,6 +13,17 @@ def initialize_schema(engine: Engine, embedding_model_id: str | None = None) -> 
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
+    workspace_columns = {
+        column["name"] for column in inspect(engine).get_columns("workspaces")
+    }
+    if "is_public_demo" not in workspace_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE workspaces ADD COLUMN "
+                    "is_public_demo BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
     _migrate_embedding_dimensions(engine)
     document_columns = {column["name"] for column in inspect(engine).get_columns("documents")}
     if "processing_error" not in document_columns:

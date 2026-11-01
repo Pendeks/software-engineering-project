@@ -38,11 +38,14 @@ interface ApiError {
 
 export async function request<T>(
   path: string,
-  token: string,
+  token?: string,
   init: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
+  headers.delete("Authorization");
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }

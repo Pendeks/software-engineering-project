@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+import math
 import os
 import time
 from contextlib import asynccontextmanager
@@ -23,6 +24,11 @@ from documind.answering import (
     QuestionAnswer,
     answer_question,
     create_chat_provider,
+)
+from documind.auth import (
+    InvalidAccessToken,
+    get_or_create_external_user,
+    verify_entra_access_token,
 )
 from documind.config import Settings
 from documind.database import (
@@ -210,6 +216,7 @@ def create_app(
     app.state.storage = file_storage
     app.state.embedding_provider = question_embedding_provider
     app.state.chat_provider = question_chat_provider
+    demo_request_windows: dict[str, tuple[float, int]] = {}
 
     def get_session():
         yield from session_dependency(session_factory)
@@ -241,19 +248,48 @@ def create_app(
                 duration_ms,
             )
 
-    def current_user(authorization: str | None = Header(default=None)) -> str:
+    def current_user(
+        authorization: str | None = Header(default=None),
+        session: Session = Depends(get_session),
+    ) -> str:
+        scheme, separator, supplied_token = (authorization or "").partition(" ")
+        if (
+            not separator
+            or scheme.casefold() != "bearer"
+            or not supplied_token
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if app_settings.auth_mode == "entra":
+            try:
+                issuer, subject = verify_entra_access_token(
+                    supplied_token, app_settings
+                )
+                return get_or_create_external_user(session, issuer, subject)
+            except InvalidAccessToken as error:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authentication required.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                ) from error
+            except SQLAlchemyError as error:
+                logger.exception("external_identity_resolution_failed")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication service is temporarily unavailable.",
+                ) from error
+
         configured_token = app_settings.api_token
         if configured_token is None or not configured_token.get_secret_value():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="API authentication is not configured.",
             )
-        scheme, separator, supplied_token = (authorization or "").partition(" ")
-        if (
-            not separator
-            or scheme.casefold() != "bearer"
-            or not hmac.compare_digest(supplied_token, configured_token.get_secret_value())
-        ):
+        if not hmac.compare_digest(supplied_token, configured_token.get_secret_value()):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required.",
@@ -275,6 +311,59 @@ def create_app(
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found.")
         return workspace
+
+    def require_demo_workspace(session: Session) -> Workspace:
+        workspace_id = app_settings.demo_workspace_id
+        if not workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The public demo is not configured.",
+            )
+        workspace = session.scalar(
+            select(Workspace).where(
+                Workspace.id == workspace_id,
+                Workspace.is_public_demo.is_(True),
+            )
+        )
+        if workspace is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The public demo is unavailable.",
+            )
+        return workspace
+
+    def require_demo_request_limit(request: Request) -> None:
+        client = request.client
+        if client is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The public demo is temporarily unavailable.",
+            )
+
+        now = time.monotonic()
+        window_seconds = app_settings.demo_rate_limit_window_seconds
+        client_host = client.host
+        expired_hosts = [
+            host
+            for host, (window_start, _count) in demo_request_windows.items()
+            if now - window_start >= window_seconds
+        ]
+        for host in expired_hosts:
+            del demo_request_windows[host]
+
+        window_start, request_count = demo_request_windows.get(
+            client_host, (now, 0)
+        )
+        if now - window_start >= window_seconds:
+            window_start, request_count = now, 0
+        if request_count >= app_settings.demo_rate_limit_requests:
+            retry_after = max(1, math.ceil(window_seconds - (now - window_start)))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The public demo request limit has been reached.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        demo_request_windows[client_host] = (window_start, request_count + 1)
 
     @app.get("/health")
     @app.get("/health/live")
@@ -306,6 +395,54 @@ def create_app(
                 detail="Required service is unavailable.",
             )
         return {"status": "ready"}
+
+    @app.get(
+        "/api/v1/demo/documents",
+        response_model=list[DocumentResponse],
+    )
+    def list_demo_documents(
+        request: Request,
+        session: Session = Depends(get_session),
+    ) -> list[DocumentResponse]:
+        require_demo_request_limit(request)
+        workspace = require_demo_workspace(session)
+        documents = session.scalars(
+            select(Document)
+            .where(Document.workspace_id == workspace.id)
+            .order_by(Document.created_at.desc(), Document.id)
+        )
+        return [_document_response(document) for document in documents]
+
+    @app.post(
+        "/api/v1/demo/questions",
+        response_model=QuestionResponse,
+    )
+    def ask_demo_question(
+        payload: QuestionRequest,
+        request: Request,
+        session: Session = Depends(get_session),
+    ) -> QuestionResponse:
+        require_demo_request_limit(request)
+        workspace = require_demo_workspace(session)
+        try:
+            result = answer_question(
+                session,
+                workspace.id,
+                payload.question,
+                question_embedding_provider,
+                question_chat_provider,
+                app_settings,
+            )
+        except (AnsweringError, RetrievalError, SQLAlchemyError) as error:
+            logger.error(
+                "demo_question_answering_failed error_type=%s",
+                type(error).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Question answering is temporarily unavailable.",
+            ) from error
+        return _question_response(result)
 
     @app.post(
         "/api/v1/workspaces",

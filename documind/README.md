@@ -31,7 +31,7 @@ General-purpose AI assistants may also analyze uploaded files. DocuMind's intend
 
 - Python and FastAPI backend
 - PostgreSQL with pgvector for deployment metadata, chunks, and vector search; SQLite is used for local document-management development
-- Private Azure Blob Storage for original files
+- Planned private Azure Blob Storage for production; the current implementation uses local filesystem storage
 - Local Ollama embedding and chat models by default, with Azure OpenAI as an optional provider
 - Separate API and ingestion worker processes
 - React and Vite browser frontend
@@ -54,7 +54,7 @@ $env:DOCUMIND_API_TOKEN = [guid]::NewGuid().ToString("N")
 uvicorn documind.main:app --reload --app-dir src
 ```
 
-The local default stores metadata in `var/documind.db` and private file bytes in `var/uploads/`. Settings can also be read from a local `.env` file based on `.env.example`. The token is required for document and workspace APIs; the current local setup maps that one token to one configured user identity. It is a development scaffold, not production authentication. Do not expose it publicly or reuse a real credential. Production requires per-user authentication and authorization.
+The local default stores metadata in `var/documind.db` and private file bytes in `var/uploads/`. Settings can also be read from a local `.env` file based on `.env.example`; `DOCUMIND_AUTH_MODE=local` preserves the development bearer-token workflow. The token is required for document and workspace APIs and maps to one configured user identity. It is a development scaffold, not production authentication. Do not expose it publicly or reuse a real credential. For per-user Entra sign-in, see [Entra sign-in and the public demo](#entra-sign-in-and-the-public-demo).
 
 Documents can be listed and inspected only within an authorized workspace. Deletion records progress and keeps failed deletions retryable; upload validation rejects unsupported, mismatched, empty, or oversized files. The API also caps upload request bodies before multipart parsing, including requests without a declared content length. DOCX archives are checked for excessive expanded size and entry count before parsing, to reduce decompression-bomb risk.
 
@@ -114,7 +114,26 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. The development server proxies API requests to `http://127.0.0.1:8000`. Paste the bearer token configured for the API to connect; the browser holds it in memory only and clears it when disconnected or refreshed. Create or select a workspace, upload documents, follow indexing status, and ask questions against ready documents with source excerpts.
+Open `http://127.0.0.1:5173`. The development server proxies API requests to `http://127.0.0.1:8000`. In local auth mode, paste the API bearer token to connect; the browser holds it in memory only and clears it when disconnected or refreshed. Create or select a workspace, upload documents, follow indexing status, and ask questions against ready documents with source excerpts. The landing page also offers a separate no-login public demo when the demo workspace is provisioned.
+
+## Entra sign-in and the public demo
+
+Entra mode requires deployment-owner setup before it can be used. Register the API application, expose the API scope, register the single-page application (SPA), configure its redirect URI, and grant the required consent in your tenant. The code does not create registrations, grant consent, provision cloud resources, or manage tenant credentials.
+
+Set the API's `.env` values to `DOCUMIND_AUTH_MODE=entra`, `DOCUMIND_ENTRA_TENANT_ID`, `DOCUMIND_ENTRA_CLIENT_ID`, and `DOCUMIND_ENTRA_API_AUDIENCE`. Configure the frontend build with `VITE_DOCUMIND_AUTH_MODE=entra`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_API_SCOPE`, and `VITE_ENTRA_REDIRECT_URI`. The tenant and client IDs must match the registrations; the API audience and browser scope must match the API's exposed scope. For direct Vite development, set these `VITE_` variables in the shell that starts Vite. Docker Compose passes them from the project `.env` file as build arguments. Production builds reject missing Entra settings and all builds reject an unspecified auth mode. The browser uses MSAL's in-memory cache; never put a client secret in frontend configuration or the browser bundle.
+
+Entra identities are mapped to stable internal users by token issuer and subject. Local-token users' workspace memberships are not automatically transferred when switching auth modes.
+
+The public demo is deliberately separate from private sign-in. It exposes only the configured, explicitly marked demo workspace and must contain synthetic content only. Provision it with `DOCUMIND_DEMO_WORKSPACE_ID` set to a stable ID (for example, `recruiter-demo`) and run:
+
+```powershell
+python -m documind.seed_demo
+python -m documind.worker
+```
+
+Run the seed command once against the same database and storage used by the API; the existing worker indexes its queued documents. In Compose, set `DOCUMIND_DEMO_WORKSPACE_ID` in `.env`, start the services, then run `docker compose exec api python -m documind.seed_demo`. The demo offers document listing and question answering only: it has no upload, workspace, delete, or retry operations, and it does not accept a workspace ID from the browser.
+
+The demo has an in-process fixed-window limit of 30 requests per 60 seconds per client address by default. It ignores untrusted `X-Forwarded-For` values. This limit is per API process; before public exposure behind a reverse proxy, configure trusted-proxy client-address handling, and use a shared limiter before running multiple API processes or instances.
 
 ## Containerized local deployment
 
@@ -127,7 +146,7 @@ $env:DOCUMIND_POSTGRES_PASSWORD = [guid]::NewGuid().ToString("N")
 docker compose up --build
 ```
 
-Open `http://127.0.0.1:8000`. The compose stack runs PostgreSQL with pgvector, a private Ollama service, one-shot model download services, the API (including the built browser app), and the ingestion worker. Initial startup downloads the model weights; subsequent runs reuse the persistent model volume. Inference is CPU-based by default. The Ollama API is not published to the host. Uploaded files, database data, and model weights are held in local named volumes. Use `docker compose logs -f api worker` to inspect service logs; do not publish these development services directly to the internet. Stop them with `docker compose down`; persistent volumes remain until explicitly removed.
+Open `http://127.0.0.1:8000`. Compose builds the browser in local auth mode by default; set the Entra build-time `VITE_` settings above to select Entra mode. The stack runs PostgreSQL with pgvector, a private Ollama service, one-shot model download services, the API (including the built browser app), and the ingestion worker. Initial startup downloads the model weights; subsequent runs reuse the persistent model volume. Inference is CPU-based by default. The Ollama API is not published to the host. Uploaded files, database data, and model weights are held in local named volumes. Use `docker compose logs -f api worker` to inspect service logs; do not publish these development services directly to the internet. Stop them with `docker compose down`; persistent volumes remain until explicitly removed.
 
 To connect the browser, retrieve the local token from `.env` in PowerShell and paste it into the connect form:
 

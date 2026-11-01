@@ -93,5 +93,10 @@ jobs:
       - name: Audit dependencies
         run: npm audit
 
+      - name: Test web app
+        run: npm test -- --run
+
       - name: Build web app
+        env:
+          VITE_DOCUMIND_AUTH_MODE: local
         run: npm run build

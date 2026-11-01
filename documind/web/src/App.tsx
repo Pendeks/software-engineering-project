@@ -7,6 +7,14 @@ import {
   type DocumentRecord,
   type Workspace,
 } from "./api";
+import {
+  authConfigurationError,
+  getAccessToken,
+  getAuthMode,
+  hasSignedInAccount,
+  signInWithMicrosoft,
+  signOutFromMicrosoft,
+} from "./auth";
 
 type IconName =
   | "spark"
@@ -22,6 +30,164 @@ type IconName =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An unexpected error occurred.";
+}
+
+function requestPrivate<T>(
+  path: string,
+  localToken: string | null,
+  init: RequestInit = {},
+): Promise<T> {
+  const tokenPromise =
+    getAuthMode() === "entra" ? getAccessToken() : Promise.resolve(localToken ?? undefined);
+  return tokenPromise.then((token) => request<T>(path, token, init));
+}
+
+function DemoExperience({ onBack }: { onBack: () => void }) {
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<Answer | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    request<DocumentRecord[]>("/api/v1/demo/documents")
+      .then((items) => {
+        if (active) setDocuments(items);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(errorMessage(reason));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const hasActiveJobs = documents.some(
+    (document) => document.status === "queued" || document.status === "processing",
+  );
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+    request<DocumentRecord[]>("/api/v1/demo/documents")
+      .then((items) => {
+        if (active) setDocuments(items);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(errorMessage(reason));
+      });
+    }, 4000);
+    return () => {
+    active = false;
+    window.clearInterval(timer);
+    };
+  }, [hasActiveJobs]);
+
+  async function askQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!question.trim()) return;
+    setBusy(true);
+    setError("");
+    setAnswer(null);
+    try {
+      const result = await request<Answer>(
+        "/api/v1/demo/questions",
+        undefined,
+        { method: "POST", body: JSON.stringify({ question: question.trim() }) },
+      );
+      setAnswer(result);
+      setQuestion("");
+    } catch (reason: unknown) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const readyDocuments = documents.filter((document) => document.status === "ready");
+
+  return (
+    <main className="demo-page">
+      <header className="demo-topbar">
+        <a className="brand" href="#" aria-label="DocuMind home">
+          <span className="brand-mark"><Icon name="spark" size={19} /></span>
+          <span>DocuMind</span>
+        </a>
+        <button className="text-button" onClick={onBack} type="button">Back</button>
+      </header>
+      <section className="demo-content">
+        <p className="eyebrow">PUBLIC DEMO</p>
+        <h1>Explore DocuMind with sample documents.</h1>
+        <p className="page-subtitle">
+          This read-only demo uses synthetic content. Your private workspaces are not shown here.
+        </p>
+        {error && <p className="inline-error" role="alert">{error}</p>}
+        <div className="demo-card">
+          <div className="section-heading">
+            <div><h2>Sample documents</h2><span>{documents.length} files</span></div>
+          </div>
+          {documents.length === 0 ? (
+            <p className="demo-empty">The sample library is not available yet.</p>
+          ) : (
+            <ul className="document-list">
+              {documents.map((document) => (
+                <li className="document-row" key={document.id}>
+                  <div className="document-file-icon"><Icon name="file" size={19} /></div>
+                  <div className="document-info">
+                    <strong>{document.filename}</strong>
+                    <span>{statusLabel(document.status)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="demo-card">
+          <h2>Ask the sample documents</h2>
+          {answer && (
+            <div className="answer-card" aria-live="polite">
+              <p className="answer-label">{answer.abstained ? "NOT ENOUGH EVIDENCE" : "ANSWER"}</p>
+              <p className={answer.abstained ? "answer-text abstained" : "answer-text"}>
+                {answer.answer}
+              </p>
+              {!answer.abstained && answer.citations.map((citation) => (
+                <article className="citation-card" key={`${citation.document_version_id}-${citation.citation_number}`}>
+                  <div className="citation-title">
+                    <span>[{citation.citation_number}]</span><strong>{citation.filename}</strong>
+                  </div>
+                  <p>“{citation.excerpt}”</p>
+                </article>
+              ))}
+            </div>
+          )}
+          <form className="question-form" onSubmit={askQuestion}>
+            <label className="sr-only" htmlFor="demo-question-input">Ask a question</label>
+            <textarea
+              id="demo-question-input"
+              rows={3}
+              maxLength={2000}
+              placeholder="Ask a question about the sample documents…"
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              disabled={!readyDocuments.length || busy}
+            />
+            <div className="question-form-footer">
+              <span>{readyDocuments.length ? "Only sample documents are searched" : "Sample documents are being prepared"}</span>
+              <button
+                className="send-button"
+                disabled={!readyDocuments.length || !question.trim() || busy}
+                type="submit"
+                aria-label="Send question"
+              >
+                {busy ? <span className="status-spinner" /> : <Icon name="arrow" size={17} />}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  );
 }
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -54,9 +220,13 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   );
 }
 
-function App() {
+function App({ startupError = "" }: { startupError?: string }) {
   const [tokenDraft, setTokenDraft] = useState("");
   const [apiToken, setApiToken] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState(
+    getAuthMode() === "entra" && hasSignedInAccount(),
+  );
+  const [demoMode, setDemoMode] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
@@ -66,9 +236,10 @@ function App() {
   const [showWorkspaceForm, setShowWorkspaceForm] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [busyAction, setBusyAction] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(startupError || authConfigurationError);
   const [notice, setNotice] = useState("");
 
+  const isConnected = getAuthMode() === "entra" ? signedIn : apiToken !== null;
   const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
   const readyCount = useMemo(
     () => documents.filter((document) => document.status === "ready").length,
@@ -76,9 +247,9 @@ function App() {
   );
 
   useEffect(() => {
-    if (!apiToken) return;
+    if (!isConnected) return;
     let active = true;
-    request<Workspace[]>("/api/v1/workspaces", apiToken)
+    requestPrivate<Workspace[]>("/api/v1/workspaces", apiToken)
       .then((items) => {
         if (!active) return;
         setWorkspaces(items);
@@ -95,17 +266,20 @@ function App() {
     return () => {
       active = false;
     };
-  }, [apiToken]);
+  }, [apiToken, isConnected]);
 
   useEffect(() => {
-    if (!apiToken || !workspaceId) {
+    if (!isConnected || !workspaceId) {
       setDocuments([]);
       setAnswer(null);
       return;
     }
     let active = true;
     const load = () =>
-      request<DocumentRecord[]>(`/api/v1/workspaces/${workspaceId}/documents`, apiToken)
+      requestPrivate<DocumentRecord[]>(
+        `/api/v1/workspaces/${workspaceId}/documents`,
+        apiToken,
+      )
         .then((items) => {
           if (active) setDocuments(items);
         })
@@ -116,16 +290,19 @@ function App() {
     return () => {
       active = false;
     };
-  }, [apiToken, workspaceId]);
+  }, [apiToken, isConnected, workspaceId]);
 
   const hasActiveJobs = documents.some(
     (document) => document.status === "queued" || document.status === "processing",
   );
   useEffect(() => {
-    if (!apiToken || !workspaceId || !hasActiveJobs) return;
+    if (!isConnected || !workspaceId || !hasActiveJobs) return;
     let active = true;
     const timer = window.setInterval(() => {
-      request<DocumentRecord[]>(`/api/v1/workspaces/${workspaceId}/documents`, apiToken)
+      requestPrivate<DocumentRecord[]>(
+        `/api/v1/workspaces/${workspaceId}/documents`,
+        apiToken,
+      )
         .then((items) => {
           if (active) setDocuments(items);
         })
@@ -137,7 +314,7 @@ function App() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [apiToken, hasActiveJobs, workspaceId]);
+  }, [apiToken, hasActiveJobs, isConnected, workspaceId]);
 
   function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -146,7 +323,26 @@ function App() {
     setApiToken(tokenDraft.trim());
   }
 
-  function disconnect() {
+  async function connectWithMicrosoft() {
+    setError("");
+    try {
+      await signInWithMicrosoft();
+      setSignedIn(true);
+    } catch (reason: unknown) {
+      setError(errorMessage(reason));
+    }
+  }
+
+  async function disconnect() {
+    if (getAuthMode() === "entra") {
+      try {
+        await signOutFromMicrosoft();
+      } catch (reason: unknown) {
+        setError(errorMessage(reason));
+        return;
+      }
+      setSignedIn(false);
+    }
     setApiToken(null);
     setTokenDraft("");
     setWorkspaces([]);
@@ -159,11 +355,11 @@ function App() {
 
   async function createWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!apiToken || !workspaceName.trim()) return;
+    if (!isConnected || !workspaceName.trim()) return;
     setBusyAction("workspace");
     setError("");
     try {
-      const workspace = await request<Workspace>("/api/v1/workspaces", apiToken, {
+      const workspace = await requestPrivate<Workspace>("/api/v1/workspaces", apiToken, {
         method: "POST",
         body: JSON.stringify({ name: workspaceName.trim() }),
       });
@@ -180,12 +376,12 @@ function App() {
   }
 
   async function refreshDocuments() {
-    if (!apiToken || !workspaceId) return;
+    if (!isConnected || !workspaceId) return;
     setBusyAction("refresh");
     setError("");
     try {
       setDocuments(
-        await request<DocumentRecord[]>(
+        await requestPrivate<DocumentRecord[]>(
           `/api/v1/workspaces/${workspaceId}/documents`,
           apiToken,
         ),
@@ -199,14 +395,14 @@ function App() {
 
   async function uploadDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!apiToken || !workspaceId || !selectedFile) return;
+    if (!isConnected || !workspaceId || !selectedFile) return;
     setBusyAction("upload");
     setError("");
     setNotice("");
     const form = new FormData();
     form.append("file", selectedFile);
     try {
-      const uploadedDocument = await request<DocumentRecord>(
+      const uploadedDocument = await requestPrivate<DocumentRecord>(
         `/api/v1/workspaces/${workspaceId}/documents`,
         apiToken,
         { method: "POST", body: form },
@@ -224,12 +420,12 @@ function App() {
   }
 
   async function deleteDocument(document: DocumentRecord) {
-    if (!apiToken || !workspaceId) return;
+    if (!isConnected || !workspaceId) return;
     if (!window.confirm(`Remove “${document.filename}” and its indexed content?`)) return;
     setBusyAction(`delete-${document.id}`);
     setError("");
     try {
-      await request<void>(
+      await requestPrivate<void>(
         `/api/v1/workspaces/${workspaceId}/documents/${document.id}`,
         apiToken,
         { method: "DELETE" },
@@ -244,11 +440,11 @@ function App() {
   }
 
   async function retryDocument(document: DocumentRecord) {
-    if (!apiToken || !workspaceId) return;
+    if (!isConnected || !workspaceId) return;
     setBusyAction(`retry-${document.id}`);
     setError("");
     try {
-      await request(
+      await requestPrivate(
         `/api/v1/workspaces/${workspaceId}/documents/${document.id}/process`,
         apiToken,
         { method: "POST" },
@@ -264,12 +460,12 @@ function App() {
 
   async function askQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!apiToken || !workspaceId || !question.trim()) return;
+    if (!isConnected || !workspaceId || !question.trim()) return;
     setBusyAction("question");
     setError("");
     setAnswer(null);
     try {
-      const result = await request<Answer>(
+      const result = await requestPrivate<Answer>(
         `/api/v1/workspaces/${workspaceId}/questions`,
         apiToken,
         { method: "POST", body: JSON.stringify({ question: question.trim() }) },
@@ -283,7 +479,11 @@ function App() {
     }
   }
 
-  if (!apiToken) {
+  if (demoMode) {
+    return <DemoExperience onBack={() => setDemoMode(false)} />;
+  }
+
+  if (!isConnected) {
     return (
       <main className="connect-page">
         <div className="connect-brand">
@@ -297,23 +497,46 @@ function App() {
             Bring your team’s documents together and ask questions with answers you can trace
             back to the page.
           </p>
-          <form className="connect-form" onSubmit={connect}>
-            <label htmlFor="api-token">Local API bearer token</label>
-            <input
-              id="api-token"
-              type="password"
-              autoComplete="off"
-              value={tokenDraft}
-              onChange={(event) => setTokenDraft(event.target.value)}
-              placeholder="Paste your development token"
-              required
-            />
-            <button className="button button-primary button-wide" type="submit">
-              Connect securely <Icon name="arrow" size={17} />
-            </button>
-            {error && <p className="inline-error" role="alert">{error}</p>}
-          </form>
-          <p className="privacy-note"><Icon name="lock" size={15} /> Token stays in memory and clears when you disconnect.</p>
+          {getAuthMode() === "local" ? (
+            <form className="connect-form" onSubmit={connect}>
+              <label htmlFor="api-token">Local API bearer token</label>
+              <input
+                id="api-token"
+                type="password"
+                autoComplete="off"
+                value={tokenDraft}
+                onChange={(event) => setTokenDraft(event.target.value)}
+                placeholder="Paste your development token"
+                required
+              />
+              <button className="button button-primary button-wide" type="submit">
+                Connect securely <Icon name="arrow" size={17} />
+              </button>
+              {error && <p className="inline-error" role="alert">{error}</p>}
+            </form>
+          ) : (
+            <div className="connect-form">
+              <button
+                className="button button-primary button-wide"
+                onClick={() => void connectWithMicrosoft()}
+                type="button"
+                disabled={Boolean(authConfigurationError)}
+              >
+                Sign in with Microsoft <Icon name="arrow" size={17} />
+              </button>
+              {error && <p className="inline-error" role="alert">{error}</p>}
+            </div>
+          )}
+          {getAuthMode() === "local" && (
+            <p className="privacy-note"><Icon name="lock" size={15} /> Token stays in memory and clears when you disconnect.</p>
+          )}
+          <button
+            className="button button-secondary button-wide demo-entry"
+            onClick={() => setDemoMode(true)}
+            type="button"
+          >
+            Try the demo
+          </button>
         </section>
         <p className="connect-foot">A private space for the knowledge your team already owns.</p>
       </main>
@@ -367,14 +590,16 @@ function App() {
         )}
         <div className="sidebar-bottom">
           <div className="private-badge"><Icon name="lock" size={15} /><span>Private to your workspace</span></div>
-          <button className="disconnect-button" onClick={disconnect} type="button">Disconnect token</button>
+          <button className="disconnect-button" onClick={() => void disconnect()} type="button">
+            {getAuthMode() === "entra" ? "Sign out" : "Disconnect token"}
+          </button>
         </div>
       </aside>
 
       <main className="main-panel">
         <header className="topbar">
           <div className="breadcrumb">Workspace <Icon name="chevron" size={14} /> <strong>{currentWorkspace?.name ?? "Select a workspace"}</strong></div>
-          <div className="topbar-right"><span className="secure-indicator"><span /> Private workspace</span><button className="mobile-disconnect" onClick={disconnect} type="button">Disconnect</button></div>
+          <div className="topbar-right"><span className="secure-indicator"><span /> Private workspace</span><button className="mobile-disconnect" onClick={() => void disconnect()} type="button">Disconnect</button></div>
         </header>
         {error && <div className="toast toast-error" role="alert">{error}<button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
         {notice && <div className="toast toast-success" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notice">×</button></div>}

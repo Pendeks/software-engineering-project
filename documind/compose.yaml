@@ -47,6 +47,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_DOCUMIND_AUTH_MODE: ${VITE_DOCUMIND_AUTH_MODE:-local}
+        VITE_ENTRA_TENANT_ID: ${VITE_ENTRA_TENANT_ID:-}
+        VITE_ENTRA_CLIENT_ID: ${VITE_ENTRA_CLIENT_ID:-}
+        VITE_ENTRA_API_SCOPE: ${VITE_ENTRA_API_SCOPE:-}
+        VITE_ENTRA_REDIRECT_URI: ${VITE_ENTRA_REDIRECT_URI:-}
     env_file:
       - .env
     environment:
@@ -74,6 +80,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_DOCUMIND_AUTH_MODE: ${VITE_DOCUMIND_AUTH_MODE:-local}
+        VITE_ENTRA_TENANT_ID: ${VITE_ENTRA_TENANT_ID:-}
+        VITE_ENTRA_CLIENT_ID: ${VITE_ENTRA_CLIENT_ID:-}
+        VITE_ENTRA_API_SCOPE: ${VITE_ENTRA_API_SCOPE:-}
+        VITE_ENTRA_REDIRECT_URI: ${VITE_ENTRA_REDIRECT_URI:-}
     entrypoint: ["python", "-m", "documind.worker"]
     env_file:
       - .env

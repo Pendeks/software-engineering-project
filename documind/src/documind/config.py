@@ -12,6 +12,13 @@ class Settings(BaseSettings):
 
     api_token: SecretStr | None = None
     api_token_subject: str = "local-owner"
+    auth_mode: Literal["local", "entra"] = "local"
+    entra_tenant_id: str | None = None
+    entra_client_id: str | None = None
+    entra_api_audience: str | None = None
+    demo_workspace_id: str | None = None
+    demo_rate_limit_requests: int = Field(default=30, gt=0)
+    demo_rate_limit_window_seconds: int = Field(default=60, gt=0)
     database_url: str = "sqlite:///./var/documind.db"
     storage_path: Path = Path("var/uploads")
     web_static_path: Path | None = None
@@ -45,4 +52,19 @@ class Settings(BaseSettings):
     def validate_chunk_overlap(self) -> "Settings":
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
+        if self.auth_mode == "entra":
+            required_settings = {
+                "entra_tenant_id": self.entra_tenant_id,
+                "entra_client_id": self.entra_client_id,
+                "entra_api_audience": self.entra_api_audience,
+            }
+            missing = [
+                name
+                for name, value in required_settings.items()
+                if value is None or not value.strip()
+            ]
+            if missing:
+                raise ValueError(
+                    "Entra authentication requires " + ", ".join(missing) + "."
+                )
         return self
