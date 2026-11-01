@@ -5,7 +5,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Literal, Protocol
 
 from docx import Document as WordDocument
 from pypdf import PdfReader
@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from documind.config import Settings
+from documind.constants import EMBEDDING_DIMENSIONS
 from documind.document_validation import has_safe_docx_archive
 from documind.models import Chunk, Document, DocumentVersion, ProcessingJob
 from documind.storage import LocalFileStorage
@@ -26,7 +27,12 @@ class ProcessingError(Exception):
 
 
 class EmbeddingProvider(Protocol):
-    def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+    def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        input_type: Literal["document", "query"] = "document",
+    ) -> list[list[float]]: ...
 
 
 @dataclass(frozen=True)
@@ -263,8 +269,10 @@ def _safe_error_message(error: Exception) -> str:
 def _validate_embeddings(vectors: list[list[float]], expected_count: int) -> None:
     if len(vectors) != expected_count:
         raise ProcessingError("Embedding provider returned an unexpected number of vectors.")
-    if any(len(vector) != 1536 for vector in vectors):
-        raise ProcessingError("Embedding provider must return 1536-dimensional vectors.")
+    if any(len(vector) != EMBEDDING_DIMENSIONS for vector in vectors):
+        raise ProcessingError(
+            f"Embedding provider must return {EMBEDDING_DIMENSIONS}-dimensional vectors."
+        )
     if any(
         not isinstance(value, (float, int)) or not math.isfinite(value)
         for vector in vectors

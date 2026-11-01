@@ -5,10 +5,8 @@ from typing import cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from documind.constants import EMBEDDING_DIMENSIONS
 from documind.models import Chunk, Document, DocumentVersion
-
-EMBEDDING_DIMENSIONS = 1536
-
 
 class RetrievalError(Exception):
     pass

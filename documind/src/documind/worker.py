@@ -4,7 +4,7 @@ import time
 
 from documind.config import Settings
 from documind.database import create_database_engine, create_session_factory, initialize_schema
-from documind.embeddings import AzureOpenAIEmbeddingProvider
+from documind.embeddings import create_embedding_provider
 from documind.processing import process_next_job
 from documind.storage import LocalFileStorage
 
@@ -20,10 +20,10 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings()
     engine = create_database_engine(settings.database_url)
-    initialize_schema(engine)
+    initialize_schema(engine, settings.embedding_model_id)
     session_factory = create_session_factory(engine)
     storage = LocalFileStorage(settings.storage_path)
-    embedding_provider = AzureOpenAIEmbeddingProvider(settings)
+    embedding_provider = create_embedding_provider(settings)
 
     try:
         while True:

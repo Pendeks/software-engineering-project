@@ -1,7 +1,10 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from documind.constants import EMBEDDING_DIMENSIONS
 
 
 class Settings(BaseSettings):
@@ -18,11 +21,25 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=5, ge=1, le=20)
     retrieval_min_similarity: float = Field(default=0.2, ge=-1, le=1)
     processing_job_timeout_seconds: int = Field(default=900, gt=0)
+    model_provider: Literal["ollama", "azure_openai"] = "ollama"
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_embedding_model: str = "nomic-embed-text"
+    ollama_chat_model: str = "granite3.3:2b"
+    ollama_request_timeout_seconds: float = Field(default=300, gt=0)
     azure_openai_endpoint: str | None = None
     azure_openai_api_key: SecretStr | None = None
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_embedding_deployment: str | None = None
     azure_openai_chat_deployment: str | None = None
+
+    @property
+    def embedding_model_id(self) -> str:
+        if self.model_provider == "ollama":
+            return f"ollama:{self.ollama_embedding_model}:{EMBEDDING_DIMENSIONS}"
+        return (
+            f"azure_openai:{self.azure_openai_embedding_deployment or ''}:"
+            f"{EMBEDDING_DIMENSIONS}"
+        )
 
     @model_validator(mode="after")
     def validate_chunk_overlap(self) -> "Settings":

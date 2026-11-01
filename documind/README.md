@@ -32,7 +32,7 @@ General-purpose AI assistants may also analyze uploaded files. DocuMind's intend
 - Python and FastAPI backend
 - PostgreSQL with pgvector for deployment metadata, chunks, and vector search; SQLite is used for local document-management development
 - Private Azure Blob Storage for original files
-- Azure OpenAI behind embedding and chat provider interfaces
+- Local Ollama embedding and chat models by default, with Azure OpenAI as an optional provider
 - Separate API and ingestion worker processes
 - React and Vite browser frontend
 - Docker
@@ -56,15 +56,26 @@ uvicorn documind.main:app --reload --app-dir src
 
 The local default stores metadata in `var/documind.db` and private file bytes in `var/uploads/`. Settings can also be read from a local `.env` file based on `.env.example`. The token is required for document and workspace APIs; the current local setup maps that one token to one configured user identity. It is a development scaffold, not production authentication. Do not expose it publicly or reuse a real credential. Production requires per-user authentication and authorization.
 
-Documents can be listed and inspected only within an authorized workspace. Deletion records progress and keeps failed deletions retryable; upload validation rejects unsupported, mismatched, empty, or oversized files. DOCX archives are also checked for excessive expanded size and entry count before parsing, to reduce decompression-bomb risk.
+Documents can be listed and inspected only within an authorized workspace. Deletion records progress and keeps failed deletions retryable; upload validation rejects unsupported, mismatched, empty, or oversized files. The API also caps upload request bodies before multipart parsing, including requests without a declared content length. DOCX archives are checked for excessive expanded size and entry count before parsing, to reduce decompression-bomb risk.
 
-Uploads are queued for processing automatically. Configure `DOCUMIND_AZURE_OPENAI_ENDPOINT`, `DOCUMIND_AZURE_OPENAI_API_KEY`, and `DOCUMIND_AZURE_OPENAI_EMBEDDING_DEPLOYMENT` (a deployment returning 1536 dimensions) in `.env`; do not commit that file. Start the worker in a second terminal:
+Uploads are queued for processing automatically. The default local provider uses Ollama with `nomic-embed-text` for embeddings and `granite3.3:2b` for chat. Install and start [Ollama](https://ollama.com/download), then pull the models:
+
+```powershell
+ollama pull nomic-embed-text
+ollama pull granite3.3:2b
+```
+
+Both models are Apache-2.0 licensed ([embedding model card](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5), [chat model card](https://huggingface.co/ibm-granite/granite-3.3-2b-instruct)). Ollama performs inference locally; no Azure model deployment or token-billed API is needed. The first download requires an internet connection and uses local disk space.
+
+To opt into Azure instead, set `DOCUMIND_MODEL_PROVIDER=azure_openai` and configure `DOCUMIND_AZURE_OPENAI_ENDPOINT`, `DOCUMIND_AZURE_OPENAI_API_KEY`, `DOCUMIND_AZURE_OPENAI_EMBEDDING_DEPLOYMENT`, and `DOCUMIND_AZURE_OPENAI_CHAT_DEPLOYMENT` in `.env`; do not commit that file. The embedding deployment must support the requested 768-dimensional output.
+
+Start the worker in a second terminal:
 
 ```powershell
 python -m documind.worker
 ```
 
-The worker extracts PDF, DOCX, TXT, and Markdown content, creates overlapping chunks with source offsets (and PDF page numbers), and persists 1536-dimensional vectors in PostgreSQL/pgvector. SQLite uses JSON only as a local test adapter. The worker leaves a safe failure status when model configuration or processing is unavailable. Failed jobs can be retried explicitly; jobs stuck in `processing` become retryable after the 15-minute lease expires.
+The worker extracts PDF, DOCX, TXT, and Markdown content, creates overlapping chunks with source offsets (and PDF page numbers), and persists 768-dimensional vectors in PostgreSQL/pgvector. Nomic embeddings use `search_document:` for indexed passages and `search_query:` for questions. SQLite uses JSON for local development and tests. The worker leaves a safe failure status when model configuration or processing is unavailable. Failed jobs can be retried explicitly; jobs stuck in `processing` become retryable after the 15-minute lease expires. The database records the embedding model identity and dimension; startup refuses incompatible or untracked existing vectors rather than mixing models. Back up and re-index existing documents before changing embedding models.
 
 Create a workspace and upload a text document using the token configured in your current PowerShell session:
 
@@ -116,7 +127,7 @@ $env:DOCUMIND_POSTGRES_PASSWORD = [guid]::NewGuid().ToString("N")
 docker compose up --build
 ```
 
-Open `http://127.0.0.1:8000`. The compose stack runs PostgreSQL with pgvector, the API (including the built browser app), and the ingestion worker. Uploaded files and database data are held in local named volumes. Use `docker compose logs -f api worker` to inspect service logs; do not publish these development services directly to the internet. Stop them with `docker compose down`; persistent volumes remain until explicitly removed.
+Open `http://127.0.0.1:8000`. The compose stack runs PostgreSQL with pgvector, a private Ollama service, one-shot model download services, the API (including the built browser app), and the ingestion worker. Initial startup downloads the model weights; subsequent runs reuse the persistent model volume. Inference is CPU-based by default. The Ollama API is not published to the host. Uploaded files, database data, and model weights are held in local named volumes. Use `docker compose logs -f api worker` to inspect service logs; do not publish these development services directly to the internet. Stop them with `docker compose down`; persistent volumes remain until explicitly removed.
 
 To connect the browser, retrieve the local token from `.env` in PowerShell and paste it into the connect form:
 

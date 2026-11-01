@@ -13,14 +13,16 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from documind.answering import (
     AnsweringError,
-    AzureOpenAIChatProvider,
     ChatProvider,
     QuestionAnswer,
     answer_question,
+    create_chat_provider,
 )
 from documind.config import Settings
 from documind.database import (
@@ -30,7 +32,7 @@ from documind.database import (
     session_dependency,
 )
 from documind.document_validation import has_safe_docx_archive
-from documind.embeddings import AzureOpenAIEmbeddingProvider
+from documind.embeddings import create_embedding_provider
 from documind.models import (
     Document,
     DocumentVersion,
@@ -51,6 +53,66 @@ SUPPORTED_TYPES = {
     ".txt": "text/plain",
     ".md": "text/markdown",
 }
+UPLOAD_REQUEST_OVERHEAD_BYTES = 64 * 1024
+
+
+class UploadBodyLimitMiddleware:
+    def __init__(self, app: ASGIApp, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "POST"
+            or not scope["path"].startswith("/api/v1/workspaces/")
+            or not scope["path"].endswith("/documents")
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        content_length = next(
+            (
+                value
+                for name, value in scope["headers"]
+                if name.lower() == b"content-length"
+            ),
+            None,
+        )
+        if content_length is not None:
+            try:
+                if int(content_length) > self.max_body_bytes:
+                    await self._reject(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        received_bytes = 0
+
+        async def receive_with_limit() -> Message:
+            nonlocal received_bytes
+            message = await receive()
+            if message["type"] == "http.request":
+                received_bytes += len(message.get("body", b""))
+                if received_bytes > self.max_body_bytes:
+                    raise _UploadBodyTooLarge
+            return message
+
+        try:
+            await self.app(scope, receive_with_limit, send)
+        except _UploadBodyTooLarge:
+            await self._reject(scope, receive, send)
+
+    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+        response = JSONResponse(
+            status_code=413,
+            content={"detail": "The uploaded file exceeds the size limit."},
+        )
+        await response(scope, receive, send)
+
+
+class _UploadBodyTooLarge(Exception):
+    pass
 
 
 class WorkspaceCreate(BaseModel):
@@ -127,17 +189,21 @@ def create_app(
     db_engine = engine or create_database_engine(app_settings.database_url)
     session_factory = create_session_factory(db_engine)
     file_storage = storage or LocalFileStorage(app_settings.storage_path)
-    question_embedding_provider = embedding_provider or AzureOpenAIEmbeddingProvider(app_settings)
-    question_chat_provider = chat_provider or AzureOpenAIChatProvider(app_settings)
+    question_embedding_provider = embedding_provider or create_embedding_provider(app_settings)
+    question_chat_provider = chat_provider or create_chat_provider(app_settings)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         del _app
-        initialize_schema(db_engine)
+        initialize_schema(db_engine, app_settings.embedding_model_id)
         yield
         db_engine.dispose()
 
     app = FastAPI(title="DocuMind API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        UploadBodyLimitMiddleware,
+        max_body_bytes=app_settings.max_upload_bytes + UPLOAD_REQUEST_OVERHEAD_BYTES,
+    )
     app.state.settings = app_settings
     app.state.engine = db_engine
     app.state.session_factory = session_factory
@@ -496,6 +562,7 @@ def create_app(
                 select(ProcessingJob)
                 .join(DocumentVersion)
                 .where(DocumentVersion.document_id == document_id)
+                .with_for_update()
             )
         )
         if any(job.status == "processing" for job in jobs):

@@ -7,9 +7,9 @@ This architecture is the Week 9 design baseline. Implementation details may be r
 | Area | Decision | Rationale |
 |---|---|---|
 | API backend | Python with FastAPI and Pydantic | Strong support for document-processing and AI libraries, with typed request and response contracts. |
-| Relational and vector data | PostgreSQL with pgvector for deployment; SQLite with JSON vector storage for local development and tests | Keeps local workflow tests independent of PostgreSQL while using pgvector's 1536-dimensional vector type in deployment. |
+| Relational and vector data | PostgreSQL with pgvector for containerized local use; SQLite with JSON vector storage for native development and tests | Uses 768-dimensional vectors for the selected local embedding model. |
 | Original files | Private Azure Blob Storage in deployment; local filesystem behind the same storage interface in development | Separates file bytes from application data while keeping local development inexpensive. |
-| Model access | Azure OpenAI behind separate embedding and chat provider interfaces | Allows the MVP to use managed models while keeping model-specific code out of API and retrieval logic. Model deployments and quotas must be confirmed before deployment. |
+| Model access | Ollama locally by default (`nomic-embed-text` embeddings and `granite3.3:2b` chat); Azure OpenAI remains an explicit alternative | Makes the portfolio demo work without Azure resources or token-billed inference while keeping provider-specific code behind adapters. Both default models are Apache-2.0 licensed. |
 | Processing jobs | PostgreSQL-backed job records and a separate worker process | Supports retryable ingestion without requiring a separate message broker for the MVP. |
 | Client | React and TypeScript browser client built with Vite | Provides a typed, interactive document and question workflow while keeping the API deployable independently. |
 
@@ -44,7 +44,7 @@ The React/TypeScript client connects to the API through a Vite development proxy
 
 ### Container topology and health
 
-The multi-stage Docker build compiles the browser client and installs the Python API into a non-root runtime image. The same image starts either the API or the ingestion worker. The local Compose profile uses PostgreSQL with pgvector, a shared named upload volume, and a PostgreSQL health dependency for the API and worker. `/health/live` is a process liveness check; `/health/ready` performs a database query and confirms the upload directory is readable and writable. HTTP logs include a generated request ID, method, status, and duration, but not paths, prompts, file contents, tokens, or headers. This single-host local topology is not production HA; deployed environments should use managed PostgreSQL, private blob storage, managed secrets, monitoring/alerts, and durable backups.
+The multi-stage Docker build compiles the browser client and installs the Python API into a non-root runtime image. The same image starts either the API or the ingestion worker. The local Compose profile uses PostgreSQL with pgvector, a private Ollama service, sequential one-shot model downloads, and shared persistent volumes for database, uploads, and model weights. API and worker startup wait until the database and model downloads are ready. Ollama is not published on a host port; inference runs locally on CPU by default. `/health/live` is a process liveness check; `/health/ready` performs a database query and confirms the upload directory is readable and writable. HTTP logs include a generated request ID, method, status, and duration, but not paths, prompts, file contents, tokens, or headers. This single-host local topology is not production HA; deployed environments should use managed PostgreSQL, private blob storage, managed secrets, monitoring/alerts, and durable backups.
 
 ### Persistence and model adapters
 
@@ -52,7 +52,8 @@ The multi-stage Docker build compiles the browser client and installs the Python
 - pgvector stores searchable embeddings alongside chunk records and metadata.
 - A private blob container stores original files. The database stores blob keys, not public URLs.
 - A storage interface separates local development storage from Azure Blob Storage.
-- Embedding and chat interfaces isolate the application from Azure OpenAI SDK details and allow deterministic fakes in tests. Production errors must be surfaced; tests or local development must not silently return success-shaped model output.
+- Embedding and chat interfaces isolate the application from Ollama HTTP and Azure OpenAI SDK details and allow deterministic fakes in tests. Nomic document and query inputs use their required `search_document:` and `search_query:` prefixes. Production errors must be surfaced; tests or local development must not silently return success-shaped model output.
+- The default embedding space is 768 dimensions. The database records the embedding model identity; startup fails with an explicit re-indexing error if the configured model differs while chunks exist or if legacy vectors cannot be verified. The schema migrates an older PostgreSQL vector column only when it contains no chunks. SQLite applies the same dimension guard.
 
 ## Data and access model
 
@@ -72,7 +73,7 @@ Authorization is enforced server-side. The retrieval query must apply the author
 3. The original file is written to private storage. The API records document metadata, an immutable version, and a queued processing job in one database transaction; it does not return a public storage key or URL.
 4. The worker claims the job and extracts text for PDF, DOCX, plain-text, or Markdown files. PDF sections retain page numbers.
 5. Extracted text is normalized and divided into bounded, overlapping chunks. Each chunk retains its document version and source location.
-6. The worker requests embeddings in batches through the Azure OpenAI embedding provider and persists 1536-dimensional chunks and vectors. Tests use an explicit fake provider; production does not fall back to fake embeddings.
+6. The worker requests prefixed embeddings in batches through the configured embedding provider and persists 768-dimensional chunks and vectors. Tests use an explicit fake provider; production does not fall back to fake embeddings.
 7. The worker marks the document version ready only after all required chunks and embeddings are persisted. On failure, it records a safe error state and leaves the job available for an authorized explicit retry.
 
 The original file and derived records are associated with a document version. Re-indexing creates a new version so citations from an existing answer remain tied to the content that was actually indexed.
@@ -80,7 +81,7 @@ The original file and derived records are associated with a document version. Re
 ## Question answering and citation pipeline
 
 1. The API authenticates the user and verifies workspace access.
-2. It embeds the question using the configured embedding provider.
+2. It embeds the question using the configured embedding provider and the model's query-specific input format.
 3. PostgreSQL/pgvector performs cosine-distance search with workspace and ready-document filters applied in the query. The SQLite development adapter applies the same filters before ranking candidates in process. Both paths select at most the configured number of chunks that pass the minimum cosine-similarity threshold.
 4. If no chunks meet the configured relevance threshold, the API returns a clear “not found in your documents” response without asking the chat model to invent an answer.
 5. Otherwise, the chat provider receives the question and bounded source context. Retrieved document text is untrusted input and must never override system instructions.
@@ -100,7 +101,7 @@ The MVP exposes `POST /api/v1/workspaces/{workspace_id}/questions`. Its response
 - Treat source documents and retrieved passages as untrusted content to mitigate prompt injection.
 - Never log file contents, extracted text, full prompts, embedding vectors, credentials, or access tokens.
 - Keep secrets in environment-specific secret storage; use managed identity for Azure resource access where supported.
-- Configure the Azure OpenAI embedding deployment to return 1536 dimensions to match the pgvector column.
+- If Azure OpenAI is selected, use an embedding deployment that supports the requested 768 dimensions. Changing embedding models requires re-indexing existing documents; incompatible non-empty databases fail startup rather than mixing vector spaces.
 - Delete document chunks, embeddings, and stored originals when a document is deleted, and ensure re-indexing cannot expose stale unauthorized content.
 
 ## Observability and failure handling
@@ -113,13 +114,13 @@ The MVP exposes `POST /api/v1/workspaces/{workspace_id}/questions`. Its response
 
 ## Deployment shape
 
-The initial cloud topology consists of the FastAPI API, a worker process using the same application image, PostgreSQL with pgvector, private Azure Blob Storage, and Azure OpenAI deployments. The API and worker may be deployed as separate container workloads. Confirm Azure model availability, student subscription quota, and expected cost before provisioning. Local document-management development uses SQLite and filesystem storage without Azure credentials; retrieval and answer generation require configured model deployments, while automated tests use explicit fake providers.
+The on-demand portfolio topology is local: FastAPI API, worker, PostgreSQL with pgvector, private Ollama, and local filesystem-backed volumes. Ollama downloads the Apache-2.0 Granite 3.3 2B chat and Nomic Embed Text models once, then serves them privately to the application. Azure OpenAI remains optional for deployments that have suitable regional availability and budget; it is not required for local inference. Production hosting still needs a managed database, private blob storage, managed secrets, monitoring, and an explicit model-cost plan.
 
 ## Scope by milestone
 
 - Week 9: select the stack and define component boundaries, data flow, access rules, and failure behavior.
 - Week 10: implement document metadata, upload, private storage integration, workspace-scoped listing/inspection, and retryable deletion.
-- Week 11: implement PDF/DOCX/text extraction, source-aware chunking, 1536-dimensional embeddings, and a retryable worker queue with stale-claim recovery.
+- Week 11: implement PDF/DOCX/text extraction, source-aware chunking, 768-dimensional embeddings, and a retryable worker queue with stale-claim recovery.
 - Week 12: implement authorized retrieval, grounded generation, and citation responses.
 - Week 13: harden authorization, upload validation, prompt-injection handling, and quality tests.
 - Week 14: implement the React browser experience for workspace/document management and cited question answering.

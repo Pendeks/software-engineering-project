@@ -1,12 +1,16 @@
+import asyncio
 import io
 import zipfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
+import httpx
 import pytest
+import httpx
 from docx import Document as WordDocument
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -16,7 +20,7 @@ from pypdf.generic import (
     DictionaryObject,
     NameObject,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,11 +30,21 @@ from documind.answering import (
     AnsweringError,
     INSUFFICIENT_EVIDENCE,
     AzureOpenAIChatProvider,
+    OllamaChatProvider,
+    create_chat_provider,
 )
 from documind.config import Settings
-from documind.database import create_database_engine, create_session_factory
+from documind.database import (
+    create_database_engine,
+    create_session_factory,
+    initialize_schema,
+)
 from documind.document_validation import has_safe_docx_archive
-from documind.embeddings import AzureOpenAIEmbeddingProvider
+from documind.embeddings import (
+    AzureOpenAIEmbeddingProvider,
+    OllamaEmbeddingProvider,
+    create_embedding_provider,
+)
 from documind.models import Chunk, Document, DocumentVersion, ProcessingJob
 from documind.processing import (
     ProcessingError,
@@ -46,10 +60,16 @@ class FakeEmbeddingProvider:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
 
-    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        input_type: Literal["document", "query"] = "document",
+    ) -> list[list[float]]:
+        del input_type
         batch = list(texts)
         self.calls.append(batch)
-        return [[float(len(text)), *([0.0] * 1535)] for text in batch]
+        return [[float(len(text)), *([0.0] * 767)] for text in batch]
 
 
 class FakeChatProvider:
@@ -208,6 +228,58 @@ def test_upload_rejects_oversize_file_and_invalid_workspace(client):
     assert too_large.status_code == 413
     assert inaccessible.status_code == 404
     assert list(storage_path.iterdir()) == []
+
+
+def test_upload_rejects_oversized_request_body_before_multipart_parsing(client):
+    workspace_id = make_workspace(client.client)
+    maximum_request_bytes = (
+        client.settings.max_upload_bytes + api_module.UPLOAD_REQUEST_OVERHEAD_BYTES
+    )
+
+    response = client.client.post(
+        f"/api/v1/workspaces/{workspace_id}/documents",
+        headers=auth_headers(client.settings),
+        content=b"x" * (maximum_request_bytes + 1),
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "The uploaded file exceeds the size limit."}
+    assert list(client.storage_path.iterdir()) == []
+
+
+def test_upload_body_limit_enforces_chunked_requests_without_content_length():
+    messages = [
+        {"type": "http.request", "body": b"x" * 10, "more_body": True},
+        {"type": "http.request", "body": b"x", "more_body": False},
+    ]
+    sent_messages = []
+
+    async def receive():
+        return messages.pop(0)
+
+    async def send(message):
+        sent_messages.append(message)
+
+    async def downstream(scope, receive, send):
+        del scope
+        while (message := await receive())["type"] == "http.request":
+            if not message["more_body"]:
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    middleware = api_module.UploadBodyLimitMiddleware(downstream, max_body_bytes=10)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/workspaces/workspace-id/documents",
+        "headers": [],
+    }
+
+    asyncio.run(middleware(scope, receive, send))
+
+    assert sent_messages[0]["status"] == 413
+    assert sent_messages[1]["body"] == b'{"detail":"The uploaded file exceeds the size limit."}'
 
 
 def test_upload_rejects_docx_archive_over_expansion_limit(client, monkeypatch):
@@ -563,7 +635,7 @@ def test_upload_queues_job_and_worker_persists_chunks_and_embeddings(client):
     assert job.attempts == 1
     assert len(chunks) > 1
     assert [chunk.sequence_number for chunk in chunks] == list(range(len(chunks)))
-    assert all(len(chunk.embedding) == 1536 for chunk in chunks)
+    assert all(len(chunk.embedding) == 768 for chunk in chunks)
     assert all(
         source[chunk.start_offset : chunk.end_offset] == chunk.text
         for chunk in chunks
@@ -582,8 +654,13 @@ def test_failed_embedding_can_be_retried_and_does_not_leak_provider_error(client
     document_id = uploaded.json()["id"]
 
     class FailingEmbeddingProvider:
-        def embed(self, texts: Sequence[str]) -> list[list[float]]:
-            del texts
+        def embed(
+            self,
+            texts: Sequence[str],
+            *,
+            input_type: Literal["document", "query"] = "document",
+        ) -> list[list[float]]:
+            del texts, input_type
             raise RuntimeError("private endpoint credential detail")
 
     assert process_next_job(
@@ -738,6 +815,187 @@ def test_azure_chat_adapter_requires_real_configuration():
         AzureOpenAIChatProvider(Settings()).generate_answer("question", [])
 
 
+def test_local_provider_factories_default_to_ollama():
+    settings = Settings()
+
+    assert isinstance(create_embedding_provider(settings), OllamaEmbeddingProvider)
+    assert isinstance(create_chat_provider(settings), OllamaChatProvider)
+
+
+def test_azure_provider_factories_remain_selectable():
+    settings = Settings(model_provider="azure_openai")
+
+    assert isinstance(create_embedding_provider(settings), AzureOpenAIEmbeddingProvider)
+    assert isinstance(create_chat_provider(settings), AzureOpenAIChatProvider)
+
+
+def test_ollama_embedding_adapter_uses_document_and_query_prefixes(monkeypatch):
+    requests = []
+    monkeypatch.setattr(
+        "documind.embeddings.httpx.post",
+        lambda url, *, json, timeout: (
+            requests.append((url, json, timeout))
+            or httpx.Response(
+                200,
+                json={"embeddings": [[0.1] * 768] * len(json["input"])},
+                request=httpx.Request("POST", url),
+            )
+        ),
+    )
+    provider = OllamaEmbeddingProvider(
+        Settings(ollama_base_url="http://ollama.local:11434/")
+    )
+
+    document_vectors = provider.embed(["document text"])
+    query_vectors = provider.embed(["question text"], input_type="query")
+
+    assert len(document_vectors[0]) == 768
+    assert len(query_vectors[0]) == 768
+    assert requests[0] == (
+        "http://ollama.local:11434/api/embed",
+        {"model": "nomic-embed-text", "input": ["search_document: document text"]},
+        300,
+    )
+    assert requests[1][1]["input"] == ["search_query: question text"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"embeddings": []},
+        {"embeddings": [[0.0] * 767]},
+        {"embeddings": [[True] * 768]},
+        {},
+    ],
+)
+def test_ollama_embedding_adapter_rejects_malformed_vectors(monkeypatch, payload):
+    def malformed_response(url, *, json, timeout):
+        del json, timeout
+        return httpx.Response(
+            200,
+            json=payload,
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(
+        "documind.embeddings.httpx.post",
+        malformed_response,
+    )
+
+    with pytest.raises(ProcessingError, match="invalid embedding"):
+        OllamaEmbeddingProvider(Settings()).embed(["sample"])
+
+
+def test_ollama_embedding_adapter_surfaces_service_unavailability(monkeypatch):
+    def unavailable(url, *, json, timeout):
+        del url, json, timeout
+        raise httpx.ConnectError("private endpoint detail")
+
+    monkeypatch.setattr("documind.embeddings.httpx.post", unavailable)
+
+    with pytest.raises(ProcessingError, match="service is unavailable") as error:
+        OllamaEmbeddingProvider(Settings()).embed(["sample"])
+
+    assert "private endpoint detail" not in str(error.value)
+
+
+def test_ollama_chat_adapter_returns_nonempty_answer_and_uses_citation_prompt(monkeypatch):
+    requests = []
+    monkeypatch.setattr(
+        "documind.answering.httpx.post",
+        lambda url, *, json, timeout: (
+            requests.append((url, json, timeout))
+            or httpx.Response(
+                200,
+                json={"message": {"content": "The answer is supported [1]."}},
+                request=httpx.Request("POST", url),
+            )
+        ),
+    )
+
+    answer = OllamaChatProvider(Settings()).generate_answer("question", [])
+
+    assert answer == "The answer is supported [1]."
+    assert requests[0][0] == "http://127.0.0.1:11434/api/chat"
+    assert requests[0][1]["model"] == "granite3.3:2b"
+    assert requests[0][1]["stream"] is False
+    assert "untrusted data" in requests[0][1]["messages"][0]["content"]
+
+
+def test_ollama_chat_adapter_rejects_invalid_response_and_provider_errors(monkeypatch):
+    def empty_response(url, *, json, timeout):
+        del json, timeout
+        return httpx.Response(
+            200,
+            json={"message": {"content": "  "}},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(
+        "documind.answering.httpx.post",
+        empty_response,
+    )
+    with pytest.raises(AnsweringError, match="empty or invalid answer"):
+        OllamaChatProvider(Settings()).generate_answer("question", [])
+
+    def unavailable(url, *, json, timeout):
+        del url, json, timeout
+        raise httpx.ConnectError("private endpoint detail")
+
+    monkeypatch.setattr("documind.answering.httpx.post", unavailable)
+    with pytest.raises(AnsweringError, match="could not generate") as error:
+        OllamaChatProvider(Settings()).generate_answer("question", [])
+    assert "private endpoint detail" not in str(error.value)
+
+
+def test_schema_refuses_existing_embeddings_with_old_dimensions(tmp_path: Path):
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'old-dimension.db'}")
+
+    try:
+        initialize_schema(engine)
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.execute(
+                text(
+                    "INSERT INTO chunks "
+                    "(id, document_version_id, sequence_number, text, page_number, "
+                    "start_offset, end_offset, embedding) "
+                    "VALUES ('old-chunk', 'old-version', 0, 'old', NULL, 0, 3, :embedding)"
+                ),
+                {"embedding": "[" + ",".join(["0.0"] * 1536) + "]"},
+            )
+            connection.commit()
+
+        with pytest.raises(RuntimeError, match="incompatible dimension"):
+            initialize_schema(engine)
+    finally:
+        engine.dispose()
+
+
+def test_schema_refuses_switching_embedding_models_with_stored_chunks(tmp_path: Path):
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'model-change.db'}")
+
+    try:
+        initialize_schema(engine, "ollama:first-model:768")
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.execute(
+                text(
+                    "INSERT INTO chunks "
+                    "(id, document_version_id, sequence_number, text, page_number, "
+                    "start_offset, end_offset, embedding) "
+                    "VALUES ('chunk', 'version', 0, 'sample', NULL, 0, 6, :embedding)"
+                ),
+                {"embedding": "[" + ",".join(["0.0"] * 768) + "]"},
+            )
+            connection.commit()
+
+        with pytest.raises(RuntimeError, match="differs from the model"):
+            initialize_schema(engine, "ollama:second-model:768")
+    finally:
+        engine.dispose()
+
+
 def test_question_returns_workspace_scoped_citations(client):
     test_client = client.client
     first_workspace = make_workspace(test_client)
@@ -835,7 +1093,7 @@ def test_question_abstains_below_similarity_threshold(client):
     )
     with client.session_factory() as session:
         chunk = session.scalar(select(Chunk))
-        chunk.embedding = [0.0, 1.0, *([0.0] * 1534)]
+        chunk.embedding = [0.0, 1.0, *([0.0] * 766)]
         session.commit()
 
     response = client.client.post(

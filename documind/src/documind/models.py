@@ -6,6 +6,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
+from documind.constants import EMBEDDING_DIMENSIONS
 from documind.database import Base
 
 
@@ -106,5 +107,5 @@ class Chunk(Base):
     start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
     end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(
-        Vector(1536).with_variant(JSON(), "sqlite"), nullable=False
+        Vector(EMBEDDING_DIMENSIONS).with_variant(JSON(), "sqlite"), nullable=False
     )
